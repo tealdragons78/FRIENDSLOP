@@ -1,0 +1,3491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NEON ARENA // 3D P2P Hover-Tank Battle</title>
+    <!-- Tailwind CSS for crisp HUD styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS for serverless WebRTC Multiplayer -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- Tone.js for procedural WebAudio synthesizer SFX -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <!-- Import Map for Three.js ES Modules & Post-Processing (UnrealBloomPass) -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #03050c;
+            font-family: 'Rajdhani', sans-serif;
+            color: #e2e8f0;
+        }
+        .font-cyber {
+            font-family: 'Orbitron', sans-serif;
+        }
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        .hud-glass {
+            background: rgba(8, 12, 26, 0.78);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.68), inset 0 0 18px rgba(56, 189, 248, 0.07);
+        }
+        .neon-border-cyan {
+            border-color: rgba(34, 211, 238, 0.65);
+            box-shadow: 0 0 28px rgba(34, 211, 238, 0.25);
+        }
+        .neon-border-gold {
+            border-color: rgba(250, 204, 21, 0.75);
+            box-shadow: 0 0 36px rgba(250, 204, 21, 0.3);
+        }
+        .neon-text-cyan {
+            text-shadow: 0 0 12px rgba(34, 211, 238, 0.85);
+        }
+        .neon-text-pink {
+            text-shadow: 0 0 12px rgba(244, 63, 94, 0.85);
+        }
+        .neon-text-gold {
+            text-shadow: 0 0 16px rgba(250, 204, 21, 0.9);
+        }
+        #crosshair {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            width: 34px;
+            height: 34px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 15;
+            transition: transform 0.08s ease-out;
+        }
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.5);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(34, 211, 238, 0.45);
+            border-radius: 4px;
+        }
+        #toast-container {
+            position: fixed;
+            bottom: 102px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 65;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        @keyframes pulseGlow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .animate-pulse-glow {
+            animation: pulseGlow 2s infinite;
+        }
+        @keyframes modeFlashAnim {
+            0% { transform: translate(-50%, -22px) scale(0.9); opacity: 0; }
+            14% { transform: translate(-50%, 0px) scale(1.03); opacity: 1; }
+            86% { transform: translate(-50%, 0px) scale(1); opacity: 1; }
+            100% { transform: translate(-50%, -15px) scale(0.95); opacity: 0; }
+        }
+        .mode-banner-pop {
+            animation: modeFlashAnim 3.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D WebGL Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Dynamic Center Reticle / Crosshair -->
+    <div id="crosshair" class="hidden">
+        <svg viewBox="0 0 36 36" class="w-full h-full">
+            <circle id="crosshair-ring" cx="18" cy="18" r="11" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="7 4" opacity="0.95"/>
+            <circle cx="18" cy="18" r="2.2" fill="#f43f5e"/>
+            <line x1="18" y1="2" x2="18" y2="7" stroke="#22d3ee" stroke-width="1.6"/>
+            <line x1="18" y1="29" x2="18" y2="34" stroke="#22d3ee" stroke-width="1.6"/>
+            <line x1="2" y1="18" x2="7" y2="18" stroke="#22d3ee" stroke-width="1.6"/>
+            <line x1="29" y1="18" x2="34" y2="18" stroke="#22d3ee" stroke-width="1.6"/>
+        </svg>
+    </div>
+
+    <!-- Top-Center: Round Counter, Countdown Timer & Active Gamemode HUD -->
+    <div id="hud-top-center" class="hidden fixed top-4 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center pointer-events-none">
+        <div class="hud-glass rounded-2xl px-4 sm:px-6 py-2 border border-cyan-400/45 flex items-center gap-3 sm:gap-5 shadow-2xl">
+            <!-- Round Counter -->
+            <div class="text-center">
+                <span class="text-[10px] text-slate-400 uppercase tracking-widest block leading-none">ROUND</span>
+                <span id="hud-round-counter" class="font-cyber text-sm sm:text-base font-black text-amber-300 leading-tight">1 / 4</span>
+            </div>
+            <div class="h-8 w-px bg-slate-700/80"></div>
+            <!-- Countdown Clock -->
+            <div class="text-center min-w-[66px]">
+                <span class="text-[10px] text-slate-400 uppercase tracking-widest block leading-none">TIMER</span>
+                <span id="hud-round-timer" class="font-cyber text-lg sm:text-xl font-black text-cyan-300 leading-tight">00:45</span>
+            </div>
+            <div class="h-8 w-px bg-slate-700/80"></div>
+            <!-- Active Mode -->
+            <div class="text-left">
+                <div class="flex items-center gap-2">
+                    <span id="hud-mode-badge" class="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_10px_#22d3ee]"></span>
+                    <span id="hud-mode-name" class="font-cyber text-xs sm:text-sm font-black tracking-wider text-white uppercase">DEATHMATCH FFA</span>
+                </div>
+                <div id="hud-mode-desc" class="text-[11px] text-slate-300 font-medium hidden md:block">Eliminate rivals for +100 PTS</div>
+            </div>
+        </div>
+        <!-- KOTH Capture Bar (Visible only during King of the Hill) -->
+        <div id="hud-koth-bar-wrap" class="hidden mt-2 hud-glass rounded-full px-4 py-1 border border-amber-400/60 flex items-center gap-2.5">
+            <span class="font-cyber text-[10px] font-bold text-amber-300 tracking-wider">HILL CONTROL:</span>
+            <span id="hud-koth-owner" class="font-cyber text-xs font-black text-white">CONTESTED</span>
+        </div>
+    </div>
+
+    <!-- Round Transition & Mode Shift Flash Banner -->
+    <div id="mode-shift-banner" class="hidden fixed top-24 left-1/2 z-30 pointer-events-none hud-glass border-2 border-cyan-400 px-8 py-4 rounded-2xl text-center shadow-[0_0_45px_rgba(34,211,238,0.45)]">
+        <div id="mode-shift-kicker" class="font-cyber text-xs tracking-widest text-amber-300 uppercase mb-1">ROUND 2 // PROTOCOL SHIFT</div>
+        <div id="mode-shift-title" class="font-cyber text-2xl sm:text-3xl font-black text-white neon-text-cyan tracking-wider">KING OF THE HILL</div>
+        <div id="mode-shift-sub" class="text-sm text-slate-200 mt-1">Hold the Golden Beacon (+25 PTS/sec)</div>
+    </div>
+
+    <!-- Pointer Lock Prompt Banner -->
+    <div id="lock-banner" class="hidden fixed top-24 left-1/2 -translate-x-1/2 z-25 hud-glass px-5 py-2 rounded-full border border-cyan-400/50 text-cyan-300 font-semibold text-xs sm:text-sm tracking-wider cursor-pointer hover:bg-cyan-950/60 transition flex items-center gap-2 shadow-lg">
+        <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping"></span>
+        CLICK ARENA TO LOCK AIM ([V] 1ST/3RD PERSON • [P] MENU)
+    </div>
+
+    <!-- Respawn Overlay -->
+    <div id="respawn-overlay" class="hidden fixed inset-0 z-25 bg-rose-950/45 backdrop-blur-xs flex flex-col items-center justify-center pointer-events-none">
+        <div class="hud-glass border-rose-500/60 px-8 py-6 rounded-2xl text-center">
+            <h2 class="font-cyber text-3xl md:text-4xl font-black text-rose-400 neon-text-pink tracking-widest mb-2">HULL BREACHED</h2>
+            <p class="text-slate-300 text-lg mb-3" id="killed-by-text">Eliminated by Opponent</p>
+            <div class="font-cyber text-2xl text-cyan-300">REBOOTING IN <span id="respawn-timer" class="font-bold text-white">3.0</span>s</div>
+        </div>
+    </div>
+
+    <!-- Top-Left: Room Info, Camera Toggle & Invite Controls -->
+    <div id="hud-top-left" class="hidden fixed top-4 left-4 z-20 flex flex-col gap-2 max-w-[235px] sm:max-w-xs">
+        <div class="hud-glass rounded-xl p-3">
+            <div class="flex items-center justify-between gap-2 mb-1.5">
+                <div class="flex items-center gap-2">
+                    <span id="net-status-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span>
+                    <span id="net-role-badge" class="font-cyber text-xs font-bold tracking-wider uppercase text-cyan-300">HOST</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <button id="btn-hud-cam" class="px-2 py-1 rounded-lg bg-indigo-500/25 hover:bg-indigo-500/45 text-indigo-200 border border-indigo-400/40 font-cyber text-[10px] font-bold tracking-wider transition cursor-pointer" title="Toggle 1st / 3rd Person Camera [V]">
+                        1ST/3RD [V]
+                    </button>
+                    <button id="btn-open-pause" class="px-2.5 py-1 rounded-lg bg-slate-800/90 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-400/40 font-cyber text-[10px] font-bold tracking-wider transition cursor-pointer">
+                        MENU [P]
+                    </button>
+                </div>
+            </div>
+            <div class="flex items-center gap-1.5 bg-slate-950/80 border border-slate-700/80 rounded-lg px-2 py-1.5">
+                <span class="text-[11px] text-slate-400">ROOM:</span>
+                <span id="hud-room-id" class="font-cyber text-xs font-bold text-white tracking-wider truncate flex-1">---</span>
+                <button id="btn-copy-room" class="px-2 py-0.5 rounded bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-300 border border-cyan-400/40 text-[11px] font-bold transition cursor-pointer" title="Copy Room ID">
+                    ID
+                </button>
+                <button id="btn-copy-link" class="px-2 py-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/40 text-indigo-300 border border-indigo-400/40 text-[11px] font-bold transition cursor-pointer" title="Copy Direct Invite URL">
+                    LINK
+                </button>
+            </div>
+            <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
+                <span id="hud-peer-count">Pilots: 1</span>
+                <div class="flex items-center gap-2">
+                    <button id="btn-hud-next-mode" class="text-cyan-300 hover:text-cyan-200 underline cursor-pointer hidden" title="Advance to Next Round/Mode">
+                        Next Round
+                    </button>
+                    <button id="btn-toggle-bot" class="text-amber-300 hover:text-amber-200 underline cursor-pointer hidden">
+                        + Bot
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Kill Feed -->
+        <div id="kill-feed" class="flex flex-col gap-1 pointer-events-none"></div>
+    </div>
+
+    <!-- Top-Right: Live Tournament Leaderboard & Exit -->
+    <div id="hud-top-right" class="hidden fixed top-4 right-4 z-20 w-56 sm:w-68 flex flex-col gap-2">
+        <div class="hud-glass rounded-xl p-3">
+            <div class="flex items-center justify-between border-b border-slate-700/70 pb-1.5 mb-2">
+                <span class="font-cyber text-xs font-bold tracking-widest text-cyan-300">LEADERBOARD</span>
+                <span class="text-[11px] text-slate-400 font-semibold">PTS • K/D</span>
+            </div>
+            <div id="scoreboard-list" class="flex flex-col gap-1.5 max-h-48 overflow-y-auto text-sm">
+                <!-- Populated dynamically -->
+            </div>
+        </div>
+        <button id="btn-hud-exit" class="self-end hud-glass hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 hover:text-white px-3 py-1.5 rounded-xl font-cyber text-[11px] font-bold tracking-wider transition cursor-pointer">
+            EXIT TO LOBBY
+        </button>
+    </div>
+
+    <!-- Bottom Center: Pilot Vitals, Camera Indicator & Dash Cooldown -->
+    <div id="hud-bottom" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-20 w-11/12 max-w-md pointer-events-none">
+        <div class="hud-glass rounded-2xl p-3.5 border border-cyan-500/30">
+            <div class="flex justify-between items-end mb-1.5">
+                <div>
+                    <span class="text-xs text-slate-400 uppercase tracking-wider block">Hull Integrity</span>
+                    <span id="hud-hp-text" class="font-cyber text-xl font-black text-cyan-300">100</span>
+                    <span class="text-xs text-slate-400">/ 100</span>
+                </div>
+                <div class="text-center">
+                    <span id="hud-cam-mode-badge" class="px-2.5 py-0.5 rounded-full bg-slate-900/90 border border-cyan-500/40 font-cyber text-[10px] font-bold text-cyan-300 tracking-wider">
+                        3RD PERSON
+                    </span>
+                </div>
+                <div class="text-right">
+                    <span id="hud-dash-label" class="text-xs text-slate-400 uppercase tracking-wider block">Thruster Dash [SPACE]</span>
+                    <span id="hud-dash-status" class="font-cyber text-xs font-bold text-emerald-400">READY</span>
+                </div>
+            </div>
+            <!-- Health Bar -->
+            <div class="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-700/80 mb-2">
+                <div id="hud-hp-bar" class="h-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all duration-150" style="width: 100%;"></div>
+            </div>
+            <!-- Dash Energy Bar -->
+            <div class="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden">
+                <div id="hud-dash-bar" class="h-full bg-amber-400 transition-all duration-75" style="width: 100%;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Touch Controls -->
+    <div id="mobile-controls" class="hidden fixed inset-0 z-20 pointer-events-none">
+        <div id="touch-move-zone" class="pointer-events-auto fixed bottom-28 left-6 w-28 h-28 rounded-full hud-glass border border-cyan-400/40 flex items-center justify-center">
+            <div id="touch-move-knob" class="w-10 h-10 rounded-full bg-cyan-400/50 border border-cyan-300"></div>
+        </div>
+        <div class="pointer-events-auto fixed bottom-28 right-6 flex flex-col gap-3">
+            <button id="touch-cam-btn" class="w-16 h-12 rounded-2xl hud-glass border border-indigo-400/60 font-cyber text-[10px] font-bold text-indigo-300 active:scale-95">
+                VIEW
+            </button>
+            <button id="touch-dash-btn" class="w-16 h-16 rounded-full hud-glass border border-amber-400/60 font-cyber text-xs font-bold text-amber-300 active:scale-95">
+                DASH
+            </button>
+            <button id="touch-fire-btn" class="w-20 h-20 rounded-full bg-rose-500/30 border-2 border-rose-400 font-cyber text-sm font-black text-white shadow-[0_0_20px_rgba(244,63,94,0.5)] active:scale-95">
+                FIRE
+            </button>
+        </div>
+    </div>
+
+    <!-- PAUSE / TACTICAL MENU OVERLAY -->
+    <div id="pause-modal" class="hidden fixed inset-0 z-45 bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="hud-glass neon-border-cyan rounded-3xl w-full max-w-md p-6 sm:p-8 text-center">
+            <div class="inline-block px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-400/40 text-cyan-300 font-cyber text-[11px] tracking-widest mb-2">
+                MATCH IN PROGRESS // ROUND <span id="pause-round-info">1/4</span>
+            </div>
+            <h2 class="font-cyber text-3xl font-black text-white neon-text-cyan tracking-wider mb-1">SYSTEM PAUSED</h2>
+            <p class="text-slate-400 text-sm mb-6">Room ID: <span id="pause-room-id" class="font-cyber text-cyan-300 font-bold">---</span></p>
+
+            <div class="flex flex-col gap-3">
+                <button id="btn-pause-resume" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-cyber font-black text-sm tracking-wider shadow-[0_0_20px_rgba(34,211,238,0.4)] transition cursor-pointer">
+                    RESUME MATCH
+                </button>
+
+                <button id="btn-pause-invite" class="w-full py-3 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/35 border border-indigo-400/50 text-indigo-200 font-cyber font-bold text-xs tracking-wider transition cursor-pointer">
+                    COPY FRIEND INVITE LINK
+                </button>
+
+                <!-- Host-Only Tactical Controls -->
+                <div id="pause-host-controls" class="hidden grid grid-cols-2 gap-2.5">
+                    <button id="btn-pause-next-mode" class="py-2.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-300 font-cyber font-bold text-xs tracking-wider transition cursor-pointer">
+                        NEXT ROUND/MODE
+                    </button>
+                    <button id="btn-pause-spawn-bot" class="py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 font-cyber font-bold text-xs tracking-wider transition cursor-pointer">
+                        + SPAWN AI BOT
+                    </button>
+                </div>
+
+                <!-- Settings Toggles -->
+                <div class="grid grid-cols-3 gap-2">
+                    <button id="btn-pause-cam" class="py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-600/60 text-indigo-300 font-cyber font-bold text-[11px] tracking-wider transition cursor-pointer">
+                        VIEW: 3RD
+                    </button>
+                    <button id="btn-pause-sfx" class="py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-600/60 text-slate-200 font-cyber font-bold text-[11px] tracking-wider transition cursor-pointer">
+                        SFX: ON
+                    </button>
+                    <button id="btn-pause-gfx" class="py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-600/60 text-emerald-300 font-cyber font-bold text-[11px] tracking-wider transition cursor-pointer">
+                        BLOOM: ON
+                    </button>
+                </div>
+
+                <div class="h-px bg-slate-800 my-1"></div>
+
+                <button id="btn-pause-exit" class="w-full py-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/60 text-rose-300 hover:text-white font-cyber font-black text-xs tracking-wider transition cursor-pointer">
+                    DISCONNECT &amp; EXIT TO LOBBY
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CHAMPIONSHIP VICTORY PODIUM OVERLAY -->
+    <div id="victory-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-lg flex items-center justify-center p-4 overflow-y-auto">
+        <div class="hud-glass neon-border-gold rounded-3xl w-full max-w-xl p-6 sm:p-8 text-center my-auto">
+            <div class="inline-block px-3.5 py-1 rounded-full bg-amber-400/20 border border-amber-400/60 text-amber-300 font-cyber text-xs tracking-widest mb-2">
+                TOURNAMENT COMPLETE // FINAL STANDINGS
+            </div>
+            <h2 class="font-cyber text-3xl sm:text-5xl font-black text-amber-300 neon-text-gold tracking-wider mb-1">
+                ARENA CHAMPION
+            </h2>
+            <div id="victory-champion-card" class="my-4 bg-slate-900/90 border-2 border-amber-400/70 rounded-2xl p-4 shadow-[0_0_30px_rgba(250,204,21,0.25)]">
+                <div class="text-xs font-cyber text-amber-300 tracking-widest uppercase mb-1">1ST PLACE WINNER</div>
+                <div id="victory-winner-name" class="font-cyber text-2xl sm:text-3xl font-black text-white">PILOT-001</div>
+                <div id="victory-winner-stats" class="text-sm text-cyan-300 font-semibold mt-1">1,250 PTS • 12 KILLS • 2 DEATHS</div>
+            </div>
+
+            <!-- Full Final Leaderboard Table -->
+            <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-3 mb-6 text-left">
+                <div class="grid grid-cols-12 text-[11px] font-cyber text-slate-400 pb-2 border-b border-slate-800 px-2">
+                    <span class="col-span-2">RANK</span>
+                    <span class="col-span-5">PILOT</span>
+                    <span class="col-span-2 text-center">K/D</span>
+                    <span class="col-span-3 text-right">SCORE</span>
+                </div>
+                <div id="victory-standings-list" class="flex flex-col gap-1.5 mt-2 max-h-48 overflow-y-auto">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-3">
+                <button id="btn-victory-rematch" class="flex-1 py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-cyber font-black text-sm tracking-wider shadow-[0_0_24px_rgba(250,204,21,0.45)] transition cursor-pointer">
+                    PLAY AGAIN (REMATCH)
+                </button>
+                <button id="btn-victory-exit" class="flex-1 py-3.5 rounded-xl bg-slate-800 hover:bg-rose-500/30 border border-slate-600 hover:border-rose-400 text-slate-200 hover:text-white font-cyber font-bold text-sm tracking-wider transition cursor-pointer">
+                    EXIT TO LOBBY
+                </button>
+            </div>
+            <p id="victory-wait-note" class="hidden text-xs text-slate-400 mt-3">Waiting for Host to initiate rematch...</p>
+        </div>
+    </div>
+
+    <!-- Main Lobby / Entry Modal -->
+    <div id="lobby-modal" class="fixed inset-0 z-40 bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+        <div class="hud-glass neon-border-cyan rounded-3xl w-full max-w-xl p-6 sm:p-8 relative my-auto">
+            <div class="text-center mb-5">
+                <div class="inline-block px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-400/40 text-cyan-300 font-cyber text-xs tracking-widest mb-2">
+                    WEBRTC P2P MULTIPLAYER // 1ST &amp; 3RD PERSON // MULTI-ROUND
+                </div>
+                <h1 class="font-cyber text-3xl sm:text-5xl font-black tracking-tight text-white neon-text-cyan">
+                    NEON <span class="text-cyan-400">GRID</span> ARENA
+                </h1>
+                <p class="text-slate-300 text-sm mt-1">
+                    Compete across rotating modes. Top of the leaderboard after the final round wins!
+                </p>
+            </div>
+
+            <!-- Pilot & Match Configuration -->
+            <div class="bg-slate-900/75 border border-slate-700/80 rounded-2xl p-4 mb-4">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="text-xs font-cyber uppercase tracking-wider text-slate-400">1. Callsign &amp; Chassis Color</label>
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-[11px] font-cyber text-slate-400">ROUNDS:</span>
+                        <select id="select-rounds" class="bg-slate-950 border border-cyan-500/40 rounded-lg px-2 py-0.5 text-xs font-cyber text-cyan-300 outline-none cursor-pointer">
+                            <option value="3">3 ROUNDS</option>
+                            <option value="4" selected>4 ROUNDS</option>
+                            <option value="5">5 ROUNDS</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <input type="text" id="input-player-name" maxlength="16" placeholder="Enter Callsign..."
+                        class="flex-1 bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded-xl px-4 py-2.5 text-white font-semibold outline-none transition">
+                    <div id="color-picker" class="flex items-center justify-center gap-2 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2">
+                        <!-- Swatches injected via JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Connection Modes -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <div class="bg-slate-900/75 border border-cyan-500/30 rounded-2xl p-4 flex flex-col justify-between">
+                    <div>
+                        <h3 class="font-cyber text-base font-bold text-cyan-300 mb-1">CREATE ARENA</h3>
+                        <p class="text-xs text-slate-400 mb-4">Host a P2P match and share your Room ID or direct Invite Link with friends.</p>
+                    </div>
+                    <button id="btn-host-game" class="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-cyber font-black text-sm tracking-wider shadow-[0_0_20px_rgba(34,211,238,0.4)] transition cursor-pointer">
+                        HOST MULTIPLAYER
+                    </button>
+                </div>
+
+                <div class="bg-slate-900/75 border border-indigo-500/30 rounded-2xl p-4 flex flex-col justify-between">
+                    <div>
+                        <h3 class="font-cyber text-base font-bold text-indigo-300 mb-1">JOIN FRIEND</h3>
+                        <p class="text-xs text-slate-400 mb-2">Enter a friend's Room ID to jump into their active match.</p>
+                        <input type="text" id="input-room-id" placeholder="e.g. NEON-7429"
+                            class="w-full bg-slate-950 border border-slate-700 focus:border-indigo-400 rounded-xl px-3 py-2 text-white font-cyber text-sm uppercase tracking-wider outline-none mb-2">
+                    </div>
+                    <button id="btn-join-game" class="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-cyber font-black text-sm tracking-wider shadow-[0_0_20px_rgba(99,102,241,0.4)] transition cursor-pointer">
+                        CONNECT TO ROOM
+                    </button>
+                </div>
+            </div>
+
+            <!-- Solo Practice / Bot Mode -->
+            <div class="text-center mb-4">
+                <button id="btn-solo-mode" class="w-full py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 border border-amber-400/40 text-amber-300 font-cyber text-xs sm:text-sm font-bold tracking-wider transition cursor-pointer">
+                    SOLO PRACTICE / AI BOT TOURNAMENT (OFFLINE READY)
+                </button>
+            </div>
+
+            <div id="lobby-status" class="hidden text-center text-sm font-semibold text-cyan-300 mb-4 animate-pulse-glow">
+                Initializing WebRTC Transceiver...
+            </div>
+
+            <!-- Controls Cheat Sheet -->
+            <div class="border-t border-slate-800 pt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs text-slate-400">
+                <div class="bg-slate-950/60 rounded-lg p-2">
+                    <span class="text-white font-bold block">W A S D</span> Drive / Strafe
+                </div>
+                <div class="bg-slate-950/60 rounded-lg p-2">
+                    <span class="text-white font-bold block">V KEY</span> 1st / 3rd Person
+                </div>
+                <div class="bg-slate-950/60 rounded-lg p-2">
+                    <span class="text-white font-bold block">CLICK / SPACE</span> Fire / Dash
+                </div>
+                <div class="bg-slate-950/60 rounded-lg p-2">
+                    <span class="text-white font-bold block">P / ESC</span> Pause &amp; Exit
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        /**
+         * ============================================================================
+         * NEON GRID ARENA - 3D WebRTC Multiplayer Hover-Tank Battle
+         * Features:
+         *  - Ultra-Solid 3D Structures with Top-Surface Landing & Ray-AABB Collision
+         *  - First-Person Cockpit View + Third-Person Tactical Chase View ([V])
+         *  - Multi-Round Tournament (3/4/5 Rounds), Live Timer, Rotating Gamemodes,
+         *    Real-Time Leaderboard, and Championship Victory Podium
+         * ============================================================================
+         */
+
+        // --- 1. CONFIGURATION & GAMEMODE DEFINITIONS ---
+        const ARENA_SIZE = 132;
+        const HALF_ARENA = ARENA_SIZE / 2 - 2.6;
+        const TANK_RADIUS = 1.65;
+        const TANK_HEIGHT = 2.1;
+        const BASE_TANK_SPEED = 25.5;
+        const DASH_SPEED = 60;
+        const DASH_DURATION = 0.22;
+        const BASE_DASH_COOLDOWN = 2.0;
+        const BASE_PROJECTILE_SPEED = 86;
+        const PROJECTILE_TTL = 1.65;
+        const BASE_FIRE_COOLDOWN = 0.24;
+        const MAX_HP = 100;
+        const RESPAWN_TIME = 2.8;
+        const NETWORK_TICK_RATE = 25;
+        const ROUND_DURATION = 45; // 45 seconds per round
+
+        const GAMEMODES = [
+            {
+                id: 'DEATHMATCH',
+                name: 'DEATHMATCH FFA',
+                desc: 'Eliminate rivals for +100 PTS',
+                color: '#22d3ee',
+                colorNum: 0x22d3ee,
+                speedMult: 1.0,
+                fireRateMult: 1.0,
+                projSpeedMult: 1.0,
+                damage: 25,
+                dashCooldownMult: 1.0,
+                gravity: 28,
+                jumpBoost: 17
+            },
+            {
+                id: 'KOTH',
+                name: 'KING OF THE HILL',
+                desc: 'Hold the Golden Beacon (+25 PTS/sec)',
+                color: '#f59e0b',
+                colorNum: 0xf59e0b,
+                speedMult: 1.05,
+                fireRateMult: 1.0,
+                projSpeedMult: 1.0,
+                damage: 25,
+                dashCooldownMult: 1.0,
+                gravity: 28,
+                jumpBoost: 17
+            },
+            {
+                id: 'LOW_GRAV_RAIL',
+                name: 'LOW-G RAILGUN',
+                desc: 'High Jump • Instant-Hit 1-Shot Rail Beams',
+                color: '#a855f7',
+                colorNum: 0xa855f7,
+                speedMult: 1.15,
+                fireRateMult: 0.72,
+                projSpeedMult: 2.6,
+                damage: 100,
+                dashCooldownMult: 0.45,
+                gravity: 11.5,
+                jumpBoost: 23
+            },
+            {
+                id: 'OVERDRIVE',
+                name: 'OVERDRIVE FRENZY',
+                desc: '1.75x Speed • Rapid Fire • Energy Orbs (+50 PTS)',
+                color: '#f43f5e',
+                colorNum: 0xf43f5e,
+                speedMult: 1.75,
+                fireRateMult: 2.35,
+                projSpeedMult: 1.35,
+                damage: 20,
+                dashCooldownMult: 0.4,
+                gravity: 26,
+                jumpBoost: 18
+            }
+        ];
+
+        const KOTH_LOCATIONS = [
+            { x: 0, z: 0 },
+            { x: -34, z: -34 },
+            { x: 34, z: 34 },
+            { x: -34, z: 34 },
+            { x: 34, z: -34 }
+        ];
+
+        const JUMP_PADS = [
+            { x: -48, z: 0 },
+            { x: 48, z: 0 },
+            { x: 0, z: -48 },
+            { x: 0, z: 48 }
+        ];
+
+        const NEON_COLORS = [
+            { name: 'Cyan', hex: '#22d3ee', num: 0x22d3ee },
+            { name: 'Crimson', hex: '#f43f5e', num: 0xf43f5e },
+            { name: 'Emerald', hex: '#10b981', num: 0x10b981 },
+            { name: 'Amber', hex: '#f59e0b', num: 0xf59e0b },
+            { name: 'Violet', hex: '#a855f7', num: 0xa855f7 },
+            { name: 'Lime', hex: '#84cc16', num: 0x84cc16 }
+        ];
+
+        // Solid 3D Arena Cover Monoliths & Elevated Platforms
+        const ARENA_OBSTACLES = [
+            // Four Heavy Armored Citadel Monoliths around center
+            { x: -21, z: -21, w: 7.5, d: 7.5, h: 6.2, color: 0x6366f1 },
+            { x: 21, z: -21, w: 7.5, d: 7.5, h: 6.2, color: 0x6366f1 },
+            { x: -21, z: 21, w: 7.5, d: 7.5, h: 6.2, color: 0x6366f1 },
+            { x: 21, z: 21, w: 7.5, d: 7.5, h: 6.2, color: 0x6366f1 },
+            // Low-Profile Jumpable Tactical Platforms (tanks can jump on top!)
+            { x: -35, z: 0, w: 7.0, d: 10.0, h: 2.2, color: 0x22d3ee },
+            { x: 35, z: 0, w: 7.0, d: 10.0, h: 2.2, color: 0x22d3ee },
+            { x: 0, z: -35, w: 10.0, d: 7.0, h: 2.2, color: 0x22d3ee },
+            { x: 0, z: 35, w: 10.0, d: 7.0, h: 2.2, color: 0x22d3ee },
+            // Mid-lane Heavy Blast Walls
+            { x: -37, z: -17, w: 4.0, d: 11.5, h: 4.2, color: 0xf43f5e },
+            { x: 37, z: 17, w: 4.0, d: 11.5, h: 4.2, color: 0xf43f5e },
+            { x: 17, z: -37, w: 11.5, d: 4.0, h: 4.2, color: 0xf43f5e },
+            { x: -17, z: 37, w: 11.5, d: 4.0, h: 4.2, color: 0xf43f5e },
+            // Corner Bastion Bunkers
+            { x: -50, z: -50, w: 7.0, d: 7.0, h: 5.0, color: 0x10b981 },
+            { x: 50, z: -50, w: 7.0, d: 7.0, h: 5.0, color: 0x10b981 },
+            { x: -50, z: 50, w: 7.0, d: 7.0, h: 5.0, color: 0x10b981 },
+            { x: 50, z: 50, w: 7.0, d: 7.0, h: 5.0, color: 0x10b981 }
+        ];
+
+        // --- 2. GLOBAL STATE ---
+        let scene, camera, renderer, composer, bloomPass, clock;
+        let kothGroup, kothRingMesh, kothBeaconMesh, centerCrystalMesh, outerHoloRing;
+        let cockpitGroup, cockpitLeftBarrel, cockpitRightBarrel, cockpitMuzzleFlash;
+        let jumpPadMeshes = [];
+        let activeIntervals = [];
+        let soundEnabled = true;
+        let bloomEnabled = true;
+        let audioReady = false;
+        let synthLaser, synthRail, synthExplosion, synthDash, synthHit, synthModeShift, synthOrb, synthVictory;
+
+        const state = {
+            inGame: false,
+            isPaused: false,
+            isMatchOver: false,
+            isFirstPerson: false,
+            isHost: false,
+            isSolo: false,
+            roomId: '',
+            myId: '',
+            myName: 'Pilot-' + Math.floor(100 + Math.random() * 899),
+            myColor: NEON_COLORS[0].hex,
+            // Multi-Round Tournament State
+            totalRounds: 4,
+            currentRound: 1,
+            modeIndex: 0,
+            roundTimeLeft: ROUND_DURATION,
+            kothLocIndex: 0,
+            kothOwnerId: null,
+            kothTickAccum: 0,
+            energyOrbs: [],
+            // Entities
+            players: {},
+            projectiles: [],
+            railBeams: [],
+            particles: [],
+            shockwaves: [],
+            // Controls & Camera
+            cameraYaw: 0,
+            cameraPitch: 0.25,
+            cockpitRecoil: 0,
+            cockpitFlashTimer: 0,
+            isPointerLocked: false,
+            keys: { w: false, a: false, s: false, d: false, space: false },
+            mouseDown: false,
+            touchMove: { x: 0, y: 0 },
+            lastFireTime: 0,
+            lastNetSend: 0
+        };
+
+        let peer = null;
+        let hostConn = null;
+        let clientConns = {};
+
+        function getCurrentMode() {
+            return GAMEMODES[state.modeIndex] || GAMEMODES[0];
+        }
+
+        function registerManagedInterval(fn, ms) {
+            const id = setInterval(fn, ms);
+            activeIntervals.push(id);
+            return id;
+        }
+
+        function clearAllManagedIntervals() {
+            while (activeIntervals.length > 0) {
+                clearInterval(activeIntervals.pop());
+            }
+        }
+
+        // --- 3. PROCEDURAL AUDIO (TONE.JS) ---
+        function initAudio() {
+            if (audioReady || typeof Tone === 'undefined') return;
+            try {
+                Tone.start();
+                synthLaser = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: 'sawtooth' },
+                    envelope: { attack: 0.005, decay: 0.11, sustain: 0, release: 0.04 }
+                }).toDestination();
+                synthLaser.volume.value = -15;
+
+                synthRail = new Tone.PolySynth(Tone.FMSynth, {
+                    harmonicity: 3.5,
+                    modulationIndex: 12,
+                    envelope: { attack: 0.002, decay: 0.28, sustain: 0, release: 0.1 }
+                }).toDestination();
+                synthRail.volume.value = -11;
+
+                synthHit = new Tone.MembraneSynth({
+                    pitchDecay: 0.03,
+                    octaves: 3,
+                    envelope: { attack: 0.001, decay: 0.14, sustain: 0 }
+                }).toDestination();
+                synthHit.volume.value = -10;
+
+                synthExplosion = new Tone.NoiseSynth({
+                    noise: { type: 'brown' },
+                    envelope: { attack: 0.01, decay: 0.45, sustain: 0 }
+                }).toDestination();
+                synthExplosion.volume.value = -8;
+
+                synthDash = new Tone.Synth({
+                    oscillator: { type: 'triangle' },
+                    envelope: { attack: 0.01, decay: 0.18, sustain: 0 }
+                }).toDestination();
+                synthDash.volume.value = -12;
+
+                synthModeShift = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: 'sine' },
+                    envelope: { attack: 0.04, decay: 0.45, sustain: 0.1, release: 0.4 }
+                }).toDestination();
+                synthModeShift.volume.value = -10;
+
+                synthOrb = new Tone.Synth({
+                    oscillator: { type: 'sine' },
+                    envelope: { attack: 0.005, decay: 0.15, sustain: 0, release: 0.05 }
+                }).toDestination();
+                synthOrb.volume.value = -11;
+
+                synthVictory = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: 'triangle' },
+                    envelope: { attack: 0.05, decay: 0.6, sustain: 0.2, release: 0.8 }
+                }).toDestination();
+                synthVictory.volume.value = -8;
+
+                audioReady = true;
+            } catch (e) {}
+        }
+
+        function playSound(type) {
+            if (!soundEnabled || !audioReady) return;
+            try {
+                const now = Tone.now();
+                if (type === 'laser') synthLaser.triggerAttackRelease('C5', '32n', now);
+                if (type === 'rail') synthRail.triggerAttackRelease('G5', '16n', now);
+                if (type === 'hit') synthHit.triggerAttackRelease('G2', '16n', now);
+                if (type === 'explosion') synthExplosion.triggerAttackRelease('8n', now);
+                if (type === 'dash') synthDash.triggerAttackRelease('A3', '16n', now);
+                if (type === 'orb') synthOrb.triggerAttackRelease('E6', '32n', now);
+                if (type === 'modeshift') synthModeShift.triggerAttackRelease(['C4', 'G4', 'C5'], '8n', now);
+                if (type === 'victory') synthVictory.triggerAttackRelease(['C4', 'E4', 'G4', 'C5'], '4n', now);
+            } catch (e) {}
+        }
+
+        // --- 4. UI, TOASTS & CLIPBOARD HELPERS ---
+        function showToast(msg, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const el = document.createElement('div');
+            const borderClass = type === 'error' ? 'border-rose-500 text-rose-200' : 'border-cyan-400 text-cyan-200';
+            el.className = `hud-glass ${borderClass} px-4 py-2 rounded-full text-xs sm:text-sm font-semibold shadow-xl mb-2 transition-all duration-300`;
+            el.textContent = msg;
+            container.appendChild(el);
+            setTimeout(() => {
+                el.style.opacity = '0';
+                setTimeout(() => el.remove(), 300);
+            }, 2600);
+        }
+
+        function copyTextFallback(text, successMsg) {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(() => showToast(successMsg)).catch(() => legacyCopy(text, successMsg));
+            } else {
+                legacyCopy(text, successMsg);
+            }
+        }
+
+        function legacyCopy(text, successMsg) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                document.execCommand('copy');
+                showToast(successMsg);
+            } catch (err) {
+                showToast('Copy failed. Please copy manually.', 'error');
+            }
+            document.body.removeChild(ta);
+        }
+
+        function addKillFeed(killerName, victimName, killerColor) {
+            const feed = document.getElementById('kill-feed');
+            const item = document.createElement('div');
+            item.className = 'hud-glass px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-opacity duration-500';
+            item.innerHTML = `
+                <span style="color:${killerColor}" class="font-bold">${escapeHtml(killerName)}</span>
+                <span class="text-slate-400">vaporized</span>
+                <span class="text-white font-bold">${escapeHtml(victimName)}</span>
+            `;
+            feed.prepend(item);
+            if (feed.children.length > 5) feed.lastChild.remove();
+            setTimeout(() => {
+                item.style.opacity = '0';
+                setTimeout(() => item.remove(), 500);
+            }, 4200);
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        function formatCountdown(seconds) {
+            const s = Math.max(0, Math.ceil(seconds));
+            const mins = Math.floor(s / 60);
+            const secs = s % 60;
+            return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        }
+
+        // --- 5. THREE.JS 3D SCENE, SOLID ARMOR TEXTURES & COCKPIT ---
+        function initThreeJS() {
+            const canvas = document.getElementById('game-canvas');
+            clock = new THREE.Clock();
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x030612);
+            scene.fog = new THREE.FogExp2(0x030612, 0.0068);
+
+            camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.15, 360);
+            camera.position.set(0, 24, 38);
+            scene.add(camera);
+
+            renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.15;
+
+            // UnrealBloomPass Post-Processing
+            composer = new EffectComposer(renderer);
+            const renderPass = new RenderPass(scene, camera);
+            composer.addPass(renderPass);
+
+            bloomPass = new UnrealBloomPass(
+                new THREE.Vector2(window.innerWidth, window.innerHeight),
+                0.72,
+                0.42,
+                0.74
+            );
+            composer.addPass(bloomPass);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x334155, 1.6);
+            scene.add(ambientLight);
+
+            const hemiLight = new THREE.HemisphereLight(0x38bdf8, 0x0f172a, 1.0);
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xe0f2fe, 1.8);
+            dirLight.position.set(45, 85, 35);
+            scene.add(dirLight);
+
+            const centerLight = new THREE.PointLight(0x22d3ee, 3.0, 60);
+            centerLight.position.set(0, 12, 0);
+            scene.add(centerLight);
+
+            buildArenaEnvironment();
+            buildKothZoneVisuals();
+            buildFirstPersonCockpit();
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function createCyberFloorTexture() {
+            const c = document.createElement('canvas');
+            c.width = 512;
+            c.height = 512;
+            const ctx = c.getContext('2d');
+
+            ctx.fillStyle = '#060a18';
+            ctx.fillRect(0, 0, 512, 512);
+
+            ctx.strokeStyle = 'rgba(34, 211, 238, 0.16)';
+            ctx.lineWidth = 2;
+            const step = 64;
+            for (let i = 0; i <= 512; i += step) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, 512);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(512, i);
+                ctx.stroke();
+            }
+
+            ctx.fillStyle = 'rgba(56, 189, 248, 0.35)';
+            for (let x = 0; x <= 512; x += 128) {
+                for (let y = 0; y <= 512; y += 128) {
+                    ctx.fillRect(x - 3, y - 3, 6, 6);
+                }
+            }
+
+            const tex = new THREE.CanvasTexture(c);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(16, 16);
+            return tex;
+        }
+
+        function createHeavyArmorTexture() {
+            const c = document.createElement('canvas');
+            c.width = 256;
+            c.height = 256;
+            const ctx = c.getContext('2d');
+
+            ctx.fillStyle = '#111827';
+            ctx.fillRect(0, 0, 256, 256);
+
+            // Brushed metallic armor plates & rivets
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(6, 6, 244, 244);
+            ctx.strokeRect(18, 18, 220, 220);
+
+            // Diagonal hazard/structural ribs
+            ctx.strokeStyle = 'rgba(148, 163, 184, 0.14)';
+            ctx.lineWidth = 3;
+            for (let i = -256; i < 512; i += 32) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i + 256, 256);
+                ctx.stroke();
+            }
+
+            const tex = new THREE.CanvasTexture(c);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+
+        function buildArenaEnvironment() {
+            const floorTex = createCyberFloorTexture();
+            const armorTex = createHeavyArmorTexture();
+
+            // 1. Solid Arena Floor
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE),
+                new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.25, metalness: 0.8 })
+            );
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // 2. Thick Reinforced Perimeter Fortress Walls
+            const wallMat = new THREE.MeshStandardMaterial({
+                map: armorTex,
+                color: 0x1e293b,
+                roughness: 0.3,
+                metalness: 0.85
+            });
+            const borderThickness = 3.2;
+            const borderHeight = 6.5;
+            const half = ARENA_SIZE / 2 + borderThickness / 2;
+
+            const borders = [
+                { x: 0, z: -half, w: ARENA_SIZE + 6.4, d: borderThickness },
+                { x: 0, z: half, w: ARENA_SIZE + 6.4, d: borderThickness },
+                { x: -half, z: 0, w: borderThickness, d: ARENA_SIZE },
+                { x: half, z: 0, w: borderThickness, d: ARENA_SIZE }
+            ];
+
+            borders.forEach(b => {
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(b.w, borderHeight, b.d), wallMat);
+                mesh.position.set(b.x, borderHeight / 2, b.z);
+                scene.add(mesh);
+
+                // Heavy Top Armor Coping
+                const coping = new THREE.Mesh(
+                    new THREE.BoxGeometry(b.w + 0.3, 0.45, b.d + 0.3),
+                    new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.9, roughness: 0.2 })
+                );
+                coping.position.set(b.x, borderHeight + 0.2, b.z);
+                scene.add(coping);
+
+                // Dual Neon Energy Rails
+                const topRail = new THREE.Mesh(
+                    new THREE.BoxGeometry(b.w + 0.35, 0.22, b.d + 0.35),
+                    new THREE.MeshBasicMaterial({ color: 0x22d3ee })
+                );
+                topRail.position.set(b.x, borderHeight + 0.45, b.z);
+                scene.add(topRail);
+
+                const midRail = new THREE.Mesh(
+                    new THREE.BoxGeometry(b.w + 0.2, 0.16, b.d + 0.2),
+                    new THREE.MeshBasicMaterial({ color: 0x6366f1 })
+                );
+                midRail.position.set(b.x, 2.5, b.z);
+                scene.add(midRail);
+            });
+
+            // 3. Central Floating Reactor Crystal
+            centerCrystalMesh = new THREE.Mesh(
+                new THREE.OctahedronGeometry(2.3, 0),
+                new THREE.MeshBasicMaterial({ color: 0x22d3ee })
+            );
+            centerCrystalMesh.position.set(0, 10.5, 0);
+            scene.add(centerCrystalMesh);
+
+            const holoGeo = new THREE.TorusGeometry(4.4, 0.12, 12, 48);
+            holoGeo.rotateX(Math.PI / 2);
+            outerHoloRing = new THREE.Mesh(holoGeo, new THREE.MeshBasicMaterial({ color: 0x38bdf8 }));
+            outerHoloRing.position.set(0, 10.5, 0);
+            scene.add(outerHoloRing);
+
+            // 4. Ultra-Solid Multi-Layered Armored Obstacles & Platforms
+            ARENA_OBSTACLES.forEach(obs => {
+                const group = new THREE.Group();
+                group.position.set(obs.x, 0, obs.z);
+
+                // Heavy Grounded Plinth Base
+                const plinth = new THREE.Mesh(
+                    new THREE.BoxGeometry(obs.w + 0.35, 0.45, obs.d + 0.35),
+                    new THREE.MeshStandardMaterial({ color: 0x090d16, metalness: 0.9, roughness: 0.25 })
+                );
+                plinth.position.y = 0.225;
+                group.add(plinth);
+
+                // Main Reinforced Solid Core
+                const coreGeo = new THREE.BoxGeometry(obs.w, obs.h, obs.d);
+                const coreMat = new THREE.MeshStandardMaterial({
+                    map: armorTex,
+                    color: 0x1e293b,
+                    roughness: 0.28,
+                    metalness: 0.85
+                });
+                const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+                coreMesh.position.y = obs.h / 2;
+                group.add(coreMesh);
+
+                // Top Landing Deck Plate (for jumpable platforms)
+                const deck = new THREE.Mesh(
+                    new THREE.BoxGeometry(obs.w + 0.15, 0.24, obs.d + 0.15),
+                    new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.92, roughness: 0.2 })
+                );
+                deck.position.y = obs.h + 0.05;
+                group.add(deck);
+
+                // Neon Perimeter Edge Framing
+                const edges = new THREE.EdgesGeometry(coreGeo);
+                const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: obs.color }));
+                line.position.y = obs.h / 2;
+                group.add(line);
+
+                // Glowing Energy Trim Band
+                const trim = new THREE.Mesh(
+                    new THREE.BoxGeometry(obs.w + 0.18, 0.16, obs.d + 0.18),
+                    new THREE.MeshBasicMaterial({ color: obs.color })
+                );
+                trim.position.y = obs.h - 0.15;
+                group.add(trim);
+
+                scene.add(group);
+            });
+
+            // 5. Energy Jump Pads
+            JUMP_PADS.forEach(jp => {
+                const padGroup = new THREE.Group();
+                padGroup.position.set(jp.x, 0.08, jp.z);
+
+                const base = new THREE.Mesh(
+                    new THREE.CylinderGeometry(3.3, 3.7, 0.28, 24),
+                    new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.9, roughness: 0.2 })
+                );
+                padGroup.add(base);
+
+                const ring = new THREE.Mesh(
+                    new THREE.RingGeometry(1.8, 3.0, 24),
+                    new THREE.MeshBasicMaterial({ color: 0x10b981, side: THREE.DoubleSide })
+                );
+                ring.rotation.x = -Math.PI / 2;
+                ring.position.y = 0.18;
+                padGroup.add(ring);
+
+                scene.add(padGroup);
+                jumpPadMeshes.push({ x: jp.x, z: jp.z, ring });
+            });
+
+            // 6. Cosmic Starfield & Orbital Ring
+            const starGeo = new THREE.BufferGeometry();
+            const starCount = 700;
+            const starPos = new Float32Array(starCount * 3);
+            const starColors = new Float32Array(starCount * 3);
+            const palette = [new THREE.Color(0x22d3ee), new THREE.Color(0xa855f7), new THREE.Color(0xf43f5e), new THREE.Color(0xffffff)];
+
+            for (let i = 0; i < starCount; i++) {
+                starPos[i * 3] = (Math.random() - 0.5) * 320;
+                starPos[i * 3 + 1] = 12 + Math.random() * 110;
+                starPos[i * 3 + 2] = (Math.random() - 0.5) * 320;
+                const col = palette[i % palette.length];
+                starColors[i * 3] = col.r;
+                starColors[i * 3 + 1] = col.g;
+                starColors[i * 3 + 2] = col.b;
+            }
+            starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+            starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+            scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ size: 0.85, vertexColors: true, transparent: true, opacity: 0.85 })));
+
+            const skyRingGeo = new THREE.TorusGeometry(118, 0.35, 12, 96);
+            skyRingGeo.rotateX(Math.PI / 2.4);
+            skyRingGeo.rotateY(0.3);
+            const skyRing = new THREE.Mesh(skyRingGeo, new THREE.MeshBasicMaterial({ color: 0x312e81 }));
+            skyRing.position.y = 35;
+            scene.add(skyRing);
+        }
+
+        function buildKothZoneVisuals() {
+            kothGroup = new THREE.Group();
+            kothGroup.visible = false;
+
+            const ringGeo = new THREE.RingGeometry(8.5, 9.6, 48);
+            ringGeo.rotateX(-Math.PI / 2);
+            kothRingMesh = new THREE.Mesh(
+                ringGeo,
+                new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.DoubleSide })
+            );
+            kothRingMesh.position.y = 0.16;
+            kothGroup.add(kothRingMesh);
+
+            const beaconGeo = new THREE.CylinderGeometry(8.8, 8.8, 30, 32, 1, true);
+            kothBeaconMesh = new THREE.Mesh(
+                beaconGeo,
+                new THREE.MeshBasicMaterial({
+                    color: 0xf59e0b,
+                    transparent: true,
+                    opacity: 0.14,
+                    side: THREE.DoubleSide,
+                    depthWrite: false
+                })
+            );
+            kothBeaconMesh.position.y = 15;
+            kothGroup.add(kothBeaconMesh);
+
+            scene.add(kothGroup);
+        }
+
+        // First-Person 3D Cockpit HUD & Forward Dual Cannons attached to Camera
+        function buildFirstPersonCockpit() {
+            cockpitGroup = new THREE.Group();
+            cockpitGroup.visible = false;
+
+            const strutMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.9, roughness: 0.2 });
+            const neonTrimMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
+
+            // Left & Right Angled Canopy Frame Struts
+            const strutGeo = new THREE.BoxGeometry(0.045, 0.95, 0.045);
+            const leftStrut = new THREE.Mesh(strutGeo, strutMat);
+            leftStrut.position.set(-0.78, 0.05, -0.85);
+            leftStrut.rotation.z = -0.24;
+            leftStrut.rotation.x = 0.25;
+
+            const rightStrut = new THREE.Mesh(strutGeo, strutMat);
+            rightStrut.position.set(0.78, 0.05, -0.85);
+            rightStrut.rotation.z = 0.24;
+            rightStrut.rotation.x = 0.25;
+
+            // Lower Dashboard Console Lip
+            const dashBase = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.16, 0.35), strutMat);
+            dashBase.position.set(0, -0.46, -0.82);
+            dashBase.rotation.x = 0.2;
+
+            const dashTrim = new THREE.Mesh(new THREE.BoxGeometry(1.26, 0.018, 0.02), neonTrimMat);
+            dashTrim.position.set(0, -0.37, -0.78);
+
+            // Forward Dual Plasma/Rail Barrels in Lower Periphery
+            const barrelGeo = new THREE.CylinderGeometry(0.045, 0.065, 0.85, 10);
+            barrelGeo.rotateX(Math.PI / 2);
+            const barrelMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.9, roughness: 0.2 });
+
+            cockpitLeftBarrel = new THREE.Group();
+            const lMesh = new THREE.Mesh(barrelGeo, barrelMat);
+            const lTip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.12, 10).rotateX(Math.PI / 2), neonTrimMat);
+            lTip.position.z = -0.44;
+            cockpitLeftBarrel.add(lMesh, lTip);
+            cockpitLeftBarrel.position.set(-0.42, -0.34, -0.95);
+
+            cockpitRightBarrel = new THREE.Group();
+            const rMesh = new THREE.Mesh(barrelGeo, barrelMat);
+            const rTip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.12, 10).rotateX(Math.PI / 2), neonTrimMat);
+            rTip.position.z = -0.44;
+            cockpitRightBarrel.add(rMesh, rTip);
+            cockpitRightBarrel.position.set(0.42, -0.34, -0.95);
+
+            // Muzzle Flash Glow
+            cockpitMuzzleFlash = new THREE.Mesh(
+                new THREE.SphereGeometry(0.14, 8, 8),
+                new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.0 })
+            );
+            cockpitMuzzleFlash.position.set(0, -0.32, -1.45);
+
+            cockpitGroup.add(leftStrut, rightStrut, dashBase, dashTrim, cockpitLeftBarrel, cockpitRightBarrel, cockpitMuzzleFlash);
+            camera.add(cockpitGroup);
+        }
+
+        function setCameraPerspective(firstPerson) {
+            state.isFirstPerson = firstPerson;
+            const me = state.players[state.myId];
+
+            if (cockpitGroup) {
+                cockpitGroup.visible = state.inGame && state.isFirstPerson && me && me.hp > 0;
+                if (me) {
+                    const colNum = new THREE.Color(me.color).getHex();
+                    cockpitMuzzleFlash.material.color.setHex(colNum);
+                }
+            }
+
+            if (me && me.visual) {
+                // Hide local outer tank hull in 1st-person so it never obscures vision
+                me.visual.hull.visible = !state.isFirstPerson;
+                me.visual.turretGroup.visible = !state.isFirstPerson;
+            }
+
+            const badge = document.getElementById('hud-cam-mode-badge');
+            const pauseBtn = document.getElementById('btn-pause-cam');
+            if (badge) {
+                badge.textContent = state.isFirstPerson ? '1ST PERSON COCKPIT' : '3RD PERSON CHASE';
+            }
+            if (pauseBtn) {
+                pauseBtn.textContent = state.isFirstPerson ? 'VIEW: 1ST' : 'VIEW: 3RD';
+            }
+        }
+
+        function onWindowResize() {
+            if (!camera || !renderer) return;
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            if (composer) composer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- 6. HOVER-TANK MESH & VISUALS ---
+        function createHoverTankMesh(colorHex, name) {
+            const root = new THREE.Group();
+            const colorNum = new THREE.Color(colorHex).getHex();
+            const neonMat = new THREE.MeshBasicMaterial({ color: colorNum });
+
+            const hullGeo = new THREE.BoxGeometry(2.3, 0.72, 3.3);
+            const hullMat = new THREE.MeshStandardMaterial({
+                color: 0x162033,
+                roughness: 0.22,
+                metalness: 0.88
+            });
+            const hull = new THREE.Mesh(hullGeo, hullMat);
+            hull.position.y = 0.85;
+            root.add(hull);
+
+            const noseGeo = new THREE.ConeGeometry(1.15, 1.1, 4);
+            noseGeo.rotateX(-Math.PI / 2);
+            noseGeo.rotateY(Math.PI / 4);
+            const nose = new THREE.Mesh(noseGeo, hullMat);
+            nose.scale.set(1.3, 0.62, 1.0);
+            nose.position.set(0, 0.85, -2.0);
+            hull.add(nose);
+
+            const podGeo = new THREE.BoxGeometry(0.42, 0.42, 2.9);
+            const leftPod = new THREE.Mesh(podGeo, neonMat);
+            leftPod.position.set(-1.35, 0.72, 0.1);
+            const rightPod = new THREE.Mesh(podGeo, neonMat);
+            rightPod.position.set(1.35, 0.72, 0.1);
+            hull.add(leftPod, rightPod);
+
+            const plumeGeo = new THREE.ConeGeometry(0.26, 1.4, 10);
+            plumeGeo.rotateX(Math.PI / 2);
+            const plumeMat = new THREE.MeshBasicMaterial({ color: colorNum, transparent: true, opacity: 0.85 });
+            const leftPlume = new THREE.Mesh(plumeGeo, plumeMat);
+            leftPlume.position.set(-0.75, 0.78, 2.2);
+            const rightPlume = new THREE.Mesh(plumeGeo, plumeMat);
+            rightPlume.position.set(0.75, 0.78, 2.2);
+            hull.add(leftPlume, rightPlume);
+
+            const ringGeo = new THREE.RingGeometry(1.15, 1.68, 28);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: colorNum,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.6
+            });
+            const hoverRing = new THREE.Mesh(ringGeo, ringMat);
+            hoverRing.rotation.x = -Math.PI / 2;
+            hoverRing.position.y = 0.12;
+            root.add(hoverRing);
+
+            const turretGroup = new THREE.Group();
+            turretGroup.position.set(0, 1.45, 0);
+
+            const head = new THREE.Mesh(
+                new THREE.BoxGeometry(1.45, 0.65, 1.65),
+                new THREE.MeshStandardMaterial({ color: 0x0b1120, roughness: 0.2, metalness: 0.92 })
+            );
+            turretGroup.add(head);
+
+            const visor = new THREE.Mesh(new THREE.BoxGeometry(1.48, 0.2, 0.42), neonMat);
+            visor.position.set(0, 0.08, -0.68);
+            turretGroup.add(visor);
+
+            const barrelsGroup = new THREE.Group();
+            const barrelGeo = new THREE.CylinderGeometry(0.13, 0.17, 2.15, 10);
+            barrelGeo.rotateX(Math.PI / 2);
+            const barrelMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.9, roughness: 0.2 });
+
+            const leftBarrel = new THREE.Mesh(barrelGeo, barrelMat);
+            leftBarrel.position.set(-0.38, 0, -1.35);
+            const rightBarrel = new THREE.Mesh(barrelGeo, barrelMat);
+            rightBarrel.position.set(0.38, 0, -1.35);
+
+            const tipGeo = new THREE.SphereGeometry(0.17, 8, 8);
+            const leftTip = new THREE.Mesh(tipGeo, neonMat);
+            leftTip.position.set(-0.38, 0, -2.42);
+            const rightTip = new THREE.Mesh(tipGeo, neonMat);
+            rightTip.position.set(0.38, 0, -2.42);
+
+            barrelsGroup.add(leftBarrel, rightBarrel, leftTip, rightTip);
+            turretGroup.add(barrelsGroup);
+            root.add(turretGroup);
+
+            const labelCanvas = document.createElement('canvas');
+            labelCanvas.width = 256;
+            labelCanvas.height = 64;
+            const ctx = labelCanvas.getContext('2d');
+            const labelTex = new THREE.CanvasTexture(labelCanvas);
+            const spriteMat = new THREE.SpriteMaterial({ map: labelTex, transparent: true });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.position.set(0, 3.25, 0);
+            sprite.scale.set(4.6, 1.15, 1);
+            root.add(sprite);
+
+            function updateNameplate(hp, currentName) {
+                ctx.clearRect(0, 0, 256, 64);
+                ctx.font = 'bold 21px Orbitron, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#ffffff';
+                ctx.shadowColor = '#000000';
+                ctx.shadowBlur = 6;
+                ctx.fillText(currentName || name, 128, 25);
+
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+                ctx.fillRect(48, 35, 160, 12);
+
+                const pct = Math.max(0, Math.min(1, hp / MAX_HP));
+                ctx.fillStyle = pct > 0.35 ? colorHex : '#f43f5e';
+                ctx.fillRect(50, 37, 156 * pct, 8);
+                labelTex.needsUpdate = true;
+            }
+
+            updateNameplate(MAX_HP, name);
+
+            return {
+                root,
+                hull,
+                turretGroup,
+                barrelsGroup,
+                leftPlume,
+                rightPlume,
+                hoverRing,
+                sprite,
+                updateNameplate
+            };
+        }
+
+        // --- 7. MULTI-ROUND TOURNAMENT, GAMEMODES & CHAMPIONSHIP PODIUM ---
+        function applyRoundAndMode(roundNum, newModeIndex, announce = true) {
+            state.currentRound = roundNum;
+            state.modeIndex = ((newModeIndex % GAMEMODES.length) + GAMEMODES.length) % GAMEMODES.length;
+            state.roundTimeLeft = ROUND_DURATION;
+            const mode = getCurrentMode();
+
+            document.getElementById('hud-round-counter').textContent = `${state.currentRound} / ${state.totalRounds}`;
+            document.getElementById('hud-round-timer').textContent = formatCountdown(state.roundTimeLeft);
+            document.getElementById('hud-mode-name').textContent = mode.name;
+            document.getElementById('hud-mode-desc').textContent = mode.desc;
+
+            const badge = document.getElementById('hud-mode-badge');
+            badge.style.backgroundColor = mode.color;
+            badge.style.boxShadow = `0 0 12px ${mode.color}`;
+            document.getElementById('hud-mode-timer-color')?.style;
+
+            if (centerCrystalMesh) centerCrystalMesh.material.color.setHex(mode.colorNum);
+            if (outerHoloRing) outerHoloRing.material.color.setHex(mode.colorNum);
+
+            const kothWrap = document.getElementById('hud-koth-bar-wrap');
+            if (mode.id === 'KOTH') {
+                kothGroup.visible = true;
+                kothWrap.classList.remove('hidden');
+                const loc = KOTH_LOCATIONS[state.kothLocIndex % KOTH_LOCATIONS.length];
+                kothGroup.position.set(loc.x, 0, loc.z);
+            } else {
+                kothGroup.visible = false;
+                kothWrap.classList.add('hidden');
+                state.kothOwnerId = null;
+            }
+
+            if (mode.id !== 'OVERDRIVE') {
+                clearAllEnergyOrbs();
+            }
+
+            if (announce && state.inGame) {
+                playSound('modeshift');
+                const banner = document.getElementById('mode-shift-banner');
+                const kicker = document.getElementById('mode-shift-kicker');
+                const title = document.getElementById('mode-shift-title');
+                const sub = document.getElementById('mode-shift-sub');
+
+                kicker.textContent = `ROUND ${state.currentRound} OF ${state.totalRounds}`;
+                title.textContent = mode.name;
+                title.style.color = mode.color;
+                sub.textContent = mode.desc;
+                banner.style.borderColor = mode.color;
+
+                banner.classList.remove('hidden', 'mode-banner-pop');
+                void banner.offsetWidth;
+                banner.classList.add('mode-banner-pop');
+            }
+        }
+
+        function advanceRoundOrFinishMatch() {
+            if (!state.isHost || state.isMatchOver) return;
+
+            if (state.currentRound >= state.totalRounds) {
+                // Final Round Completed -> Crown #1 Player on Leaderboard!
+                triggerMatchVictory();
+                broadcastToClients({ type: 'match_victory' });
+                return;
+            }
+
+            const nextRound = state.currentRound + 1;
+            const nextModeIdx = (state.modeIndex + 1) % GAMEMODES.length;
+            if (GAMEMODES[nextModeIdx].id === 'KOTH') {
+                state.kothLocIndex = (state.kothLocIndex + 1) % KOTH_LOCATIONS.length;
+            }
+
+            applyRoundAndMode(nextRound, nextModeIdx, true);
+            broadcastToClients({
+                type: 'round_advance',
+                currentRound: state.currentRound,
+                totalRounds: state.totalRounds,
+                modeIndex: state.modeIndex,
+                kothLocIndex: state.kothLocIndex
+            });
+        }
+
+        function triggerMatchVictory() {
+            state.isMatchOver = true;
+            state.mouseDown = false;
+            if (document.pointerLockElement) {
+                try { document.exitPointerLock(); } catch (e) {}
+            }
+            document.getElementById('lock-banner').classList.add('hidden');
+            document.getElementById('pause-modal').classList.add('hidden');
+            document.getElementById('respawn-overlay').classList.add('hidden');
+
+            playSound('victory');
+
+            const sorted = Object.values(state.players).sort((a, b) => b.score - a.score || b.kills - a.kills);
+            const champion = sorted[0];
+
+            if (champion) {
+                document.getElementById('victory-winner-name').textContent = champion.name;
+                document.getElementById('victory-winner-name').style.color = champion.color;
+                document.getElementById('victory-winner-stats').textContent =
+                    `${champion.score.toLocaleString()} PTS • ${champion.kills} KILLS • ${champion.deaths} DEATHS`;
+                spawnExplosionParticles(champion.x, (champion.y || 0) + 4, champion.z, '#facc15', 55);
+            }
+
+            const standingsEl = document.getElementById('victory-standings-list');
+            standingsEl.innerHTML = sorted.map((p, idx) => {
+                const rankBadge = idx === 0 ? '🏆 #1' : `#${idx + 1}`;
+                const rowBg = idx === 0
+                    ? 'bg-amber-400/15 border border-amber-400/50'
+                    : (p.id === state.myId ? 'bg-cyan-500/15 border border-cyan-500/40' : 'bg-slate-900/70');
+                return `
+                    <div class="grid grid-cols-12 items-center px-2.5 py-2 rounded-xl ${rowBg} text-xs sm:text-sm">
+                        <span class="col-span-2 font-cyber font-black ${idx === 0 ? 'text-amber-300' : 'text-slate-400'}">${rankBadge}</span>
+                        <div class="col-span-5 flex items-center gap-2 truncate">
+                            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${p.color}"></span>
+                            <span class="font-bold text-white truncate">${escapeHtml(p.name)}</span>
+                        </div>
+                        <span class="col-span-2 text-center text-slate-300 font-semibold">${p.kills}/${p.deaths}</span>
+                        <span class="col-span-3 text-right font-cyber font-bold text-cyan-300">${p.score}</span>
+                    </div>
+                `;
+            }).join('');
+
+            const rematchBtn = document.getElementById('btn-victory-rematch');
+            const waitNote = document.getElementById('victory-wait-note');
+            if (state.isHost) {
+                rematchBtn.classList.remove('hidden');
+                waitNote.classList.add('hidden');
+            } else {
+                rematchBtn.classList.add('hidden');
+                waitNote.classList.remove('hidden');
+            }
+
+            document.getElementById('victory-modal').classList.remove('hidden');
+        }
+
+        function resetMatchForRematch() {
+            state.isMatchOver = false;
+            state.isPaused = false;
+            document.getElementById('victory-modal').classList.add('hidden');
+            clearAllEnergyOrbs();
+
+            for (const id in state.players) {
+                const p = state.players[id];
+                const spawn = getSafeSpawnPoint();
+                p.score = 0;
+                p.kills = 0;
+                p.deaths = 0;
+                p.hp = MAX_HP;
+                p.x = spawn.x;
+                p.y = 0;
+                p.z = spawn.z;
+                p.vy = 0;
+                p.targetX = spawn.x;
+                p.targetY = 0;
+                p.targetZ = spawn.z;
+                p.visual.root.position.set(spawn.x, 0, spawn.z);
+                p.visual.root.visible = true;
+                p.visual.updateNameplate(MAX_HP, p.name);
+            }
+
+            applyRoundAndMode(1, 0, true);
+            setCameraPerspective(state.isFirstPerson);
+            updateMyVitalsHUD();
+            updateScoreboardUI();
+
+            if (state.isHost && !state.isSolo) {
+                broadcastToClients({
+                    type: 'rematch_start',
+                    totalRounds: state.totalRounds
+                });
+            }
+            showToast('New Tournament Started!');
+        }
+
+        function spawnEnergyOrb() {
+            if (state.energyOrbs.length >= 10) return;
+            const id = 'orb-' + Math.random().toString(36).substring(2, 7);
+            const x = (Math.random() - 0.5) * (ARENA_SIZE - 20);
+            const z = (Math.random() - 0.5) * (ARENA_SIZE - 20);
+            if (pointHitsObstacle(x, z, 1.5)) return;
+
+            const orbData = { id, x, z };
+            createOrbMesh(orbData);
+            if (state.isHost && !state.isSolo) {
+                broadcastToClients({ type: 'spawn_orb', orb: { id, x, z } });
+            }
+        }
+
+        function createOrbMesh(orbData) {
+            if (state.energyOrbs.some(o => o.id === orbData.id)) return;
+            const mesh = new THREE.Mesh(
+                new THREE.OctahedronGeometry(0.9, 0),
+                new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+            );
+            mesh.position.set(orbData.x, 1.45, orbData.z);
+            scene.add(mesh);
+            state.energyOrbs.push({ id: orbData.id, x: orbData.x, z: orbData.z, mesh });
+        }
+
+        function removeEnergyOrb(orbId) {
+            const idx = state.energyOrbs.findIndex(o => o.id === orbId);
+            if (idx !== -1) {
+                scene.remove(state.energyOrbs[idx].mesh);
+                state.energyOrbs.splice(idx, 1);
+            }
+        }
+
+        function clearAllEnergyOrbs() {
+            for (const orb of state.energyOrbs) {
+                scene.remove(orb.mesh);
+            }
+            state.energyOrbs = [];
+        }
+
+        // --- 8. PLAYER MANAGEMENT & SPAWNING ---
+        function getSafeSpawnPoint() {
+            const spawnPoints = [
+                { x: -46, z: -16 }, { x: 46, z: 16 },
+                { x: -16, z: -46 }, { x: 16, z: 46 },
+                { x: -35, z: -35 }, { x: 35, z: -35 },
+                { x: -35, z: 35 }, { x: 35, z: 35 }
+            ];
+            let best = spawnPoints[Math.floor(Math.random() * spawnPoints.length)];
+            let maxMinDist = -1;
+            for (const pt of spawnPoints) {
+                let minDist = 9999;
+                for (const id in state.players) {
+                    const p = state.players[id];
+                    if (p.hp > 0) {
+                        const d = Math.hypot(p.x - pt.x, p.z - pt.z);
+                        if (d < minDist) minDist = d;
+                    }
+                }
+                if (minDist > maxMinDist) {
+                    maxMinDist = minDist;
+                    best = pt;
+                }
+            }
+            return { x: best.x, z: best.z };
+        }
+
+        function addOrUpdatePlayer(data) {
+            let p = state.players[data.id];
+            if (!p) {
+                const spawn = data.x !== undefined ? { x: data.x, z: data.z } : getSafeSpawnPoint();
+                const visual = createHoverTankMesh(data.color || '#22d3ee', data.name || 'Pilot');
+                visual.root.position.set(spawn.x, 0, spawn.z);
+                scene.add(visual.root);
+
+                p = {
+                    id: data.id,
+                    name: data.name || 'Pilot',
+                    color: data.color || '#22d3ee',
+                    isBot: !!data.isBot,
+                    x: spawn.x,
+                    y: data.y || 0,
+                    z: spawn.z,
+                    vy: 0,
+                    targetX: spawn.x,
+                    targetY: data.y || 0,
+                    targetZ: spawn.z,
+                    hullYaw: 0,
+                    turretYaw: 0,
+                    targetTurretYaw: 0,
+                    recoilOffset: 0,
+                    hp: data.hp !== undefined ? data.hp : MAX_HP,
+                    score: data.score || 0,
+                    kills: data.kills || 0,
+                    deaths: data.deaths || 0,
+                    respawnTimer: 0,
+                    dashTimer: 0,
+                    dashCooldown: 0,
+                    dashDirX: 0,
+                    dashDirZ: 0,
+                    botAiTimer: 0,
+                    botMoveAngle: Math.random() * Math.PI * 2,
+                    botFireCooldown: 0.6,
+                    visual
+                };
+                state.players[data.id] = p;
+                updateScoreboardUI();
+            } else {
+                if (data.name) p.name = data.name;
+                if (data.color) p.color = data.color;
+                if (data.score !== undefined) p.score = data.score;
+                if (data.kills !== undefined) p.kills = data.kills;
+                if (data.deaths !== undefined) p.deaths = data.deaths;
+                if (data.hp !== undefined && p.hp !== data.hp) {
+                    p.hp = data.hp;
+                    p.visual.updateNameplate(p.hp, p.name);
+                }
+            }
+            if (p.id === state.myId) {
+                p.visual.sprite.visible = false;
+                setCameraPerspective(state.isFirstPerson);
+            }
+            return p;
+        }
+
+        function removePlayer(id) {
+            const p = state.players[id];
+            if (p) {
+                scene.remove(p.visual.root);
+                delete state.players[id];
+                updateScoreboardUI();
+            }
+        }
+
+        // --- 9. PEERJS WEBRTC MULTIPLAYER & CLEAN LIFECYCLE ---
+        function generateShortRoomId() {
+            const num = Math.floor(1000 + Math.random() * 9000);
+            return `NEON-${num}`;
+        }
+
+        function cleanupOldNetwork() {
+            clearAllManagedIntervals();
+            if (hostConn) {
+                try { hostConn.close(); } catch (e) {}
+                hostConn = null;
+            }
+            for (const id in clientConns) {
+                try { clientConns[id].close(); } catch (e) {}
+            }
+            clientConns = {};
+            if (peer) {
+                try { peer.destroy(); } catch (e) {}
+                peer = null;
+            }
+        }
+
+        function startHostMode() {
+            initAudio();
+            cleanupOldNetwork();
+            state.totalRounds = parseInt(document.getElementById('select-rounds').value, 10) || 4;
+            const customId = generateShortRoomId();
+            setLobbyStatus('Creating P2P Host Room...');
+
+            peer = new Peer(customId, { debug: 1 });
+
+            peer.on('open', (id) => {
+                state.isHost = true;
+                state.isSolo = false;
+                state.isMatchOver = false;
+                state.roomId = id;
+                state.myId = id;
+
+                applyRoundAndMode(1, 0, false);
+                enterArena();
+                addOrUpdatePlayer({
+                    id: state.myId,
+                    name: state.myName,
+                    color: state.myColor,
+                    hp: MAX_HP,
+                    score: 0,
+                    kills: 0,
+                    deaths: 0
+                });
+                document.getElementById('btn-toggle-bot').classList.remove('hidden');
+                document.getElementById('btn-hud-next-mode').classList.remove('hidden');
+                document.getElementById('pause-host-controls').classList.remove('hidden');
+                showToast(`Room ${id} Online! (${state.totalRounds} Rounds)`);
+            });
+
+            peer.on('connection', (conn) => {
+                setupHostConnectionWithClient(conn);
+            });
+
+            peer.on('error', (err) => {
+                console.error('PeerJS Host Error:', err);
+                setLobbyStatus(`Connection Error: ${err.type}. Try again or use Solo Mode.`);
+            });
+        }
+
+        function setupHostConnectionWithClient(conn) {
+            conn.on('open', () => {
+                clientConns[conn.peer] = conn;
+            });
+
+            conn.on('data', (msg) => {
+                handleNetworkMessage(conn.peer, msg);
+            });
+
+            conn.on('close', () => {
+                const leaving = state.players[conn.peer];
+                if (leaving) showToast(`${leaving.name} disconnected.`);
+                delete clientConns[conn.peer];
+                removePlayer(conn.peer);
+                broadcastToClients({ type: 'player_left', id: conn.peer });
+            });
+        }
+
+        function startClientMode(targetRoomId) {
+            initAudio();
+            cleanupOldNetwork();
+            const cleanRoom = targetRoomId.trim().toUpperCase();
+            if (!cleanRoom) {
+                showToast('Please enter a valid Room ID!', 'error');
+                return;
+            }
+            setLobbyStatus(`Connecting to Host ${cleanRoom}...`);
+
+            peer = new Peer({ debug: 1 });
+
+            peer.on('open', (myPeerId) => {
+                state.isHost = false;
+                state.isSolo = false;
+                state.isMatchOver = false;
+                state.roomId = cleanRoom;
+                state.myId = myPeerId;
+
+                hostConn = peer.connect(cleanRoom, { reliable: true });
+
+                hostConn.on('open', () => {
+                    enterArena();
+                    const spawn = getSafeSpawnPoint();
+                    addOrUpdatePlayer({
+                        id: state.myId,
+                        name: state.myName,
+                        color: state.myColor,
+                        x: spawn.x,
+                        z: spawn.z,
+                        hp: MAX_HP
+                    });
+
+                    hostConn.send({
+                        type: 'join',
+                        id: state.myId,
+                        name: state.myName,
+                        color: state.myColor,
+                        x: spawn.x,
+                        z: spawn.z
+                    });
+                    showToast(`Connected to Room ${cleanRoom}!`);
+                });
+
+                hostConn.on('data', (msg) => {
+                    handleNetworkMessage(cleanRoom, msg);
+                });
+
+                hostConn.on('close', () => {
+                    showToast('Host disconnected from arena.', 'error');
+                    exitToLobby();
+                });
+            });
+
+            peer.on('error', (err) => {
+                console.error('PeerJS Client Error:', err);
+                setLobbyStatus(`Could not reach Room "${cleanRoom}". Check ID or Host status.`);
+            });
+        }
+
+        function startSoloPracticeMode() {
+            initAudio();
+            cleanupOldNetwork();
+            state.totalRounds = parseInt(document.getElementById('select-rounds').value, 10) || 4;
+            state.isHost = true;
+            state.isSolo = true;
+            state.isMatchOver = false;
+            state.roomId = 'SOLO-ARENA';
+            state.myId = 'local-pilot';
+
+            applyRoundAndMode(1, 0, false);
+            enterArena();
+            addOrUpdatePlayer({
+                id: state.myId,
+                name: state.myName,
+                color: state.myColor,
+                hp: MAX_HP
+            });
+
+            spawnAiBot();
+            spawnAiBot();
+            spawnAiBot();
+            document.getElementById('btn-toggle-bot').classList.remove('hidden');
+            document.getElementById('btn-hud-next-mode').classList.remove('hidden');
+            document.getElementById('pause-host-controls').classList.remove('hidden');
+            showToast(`Solo ${state.totalRounds}-Round Tournament Started!`);
+        }
+
+        function exitToLobby() {
+            if (document.pointerLockElement) {
+                try { document.exitPointerLock(); } catch (e) {}
+            }
+            state.isPointerLocked = false;
+            state.isPaused = false;
+            state.isMatchOver = false;
+            state.inGame = false;
+            state.mouseDown = false;
+            state.keys = { w: false, a: false, s: false, d: false, space: false };
+
+            cleanupOldNetwork();
+
+            for (const id in state.players) {
+                scene.remove(state.players[id].visual.root);
+            }
+            state.players = {};
+
+            for (const proj of state.projectiles) scene.remove(proj.mesh);
+            state.projectiles = [];
+
+            for (const rb of state.railBeams) scene.remove(rb.mesh);
+            state.railBeams = [];
+
+            for (const pt of state.particles) scene.remove(pt.mesh);
+            state.particles = [];
+
+            for (const sw of state.shockwaves) scene.remove(sw.mesh);
+            state.shockwaves = [];
+
+            clearAllEnergyOrbs();
+            if (kothGroup) kothGroup.visible = false;
+            if (cockpitGroup) cockpitGroup.visible = false;
+
+            document.getElementById('pause-modal').classList.add('hidden');
+            document.getElementById('victory-modal').classList.add('hidden');
+            document.getElementById('respawn-overlay').classList.add('hidden');
+            document.getElementById('hud-top-left').classList.add('hidden');
+            document.getElementById('hud-top-center').classList.add('hidden');
+            document.getElementById('hud-top-right').classList.add('hidden');
+            document.getElementById('hud-bottom').classList.add('hidden');
+            document.getElementById('crosshair').classList.add('hidden');
+            document.getElementById('lock-banner').classList.add('hidden');
+            document.getElementById('mobile-controls').classList.add('hidden');
+            document.getElementById('btn-toggle-bot').classList.add('hidden');
+            document.getElementById('btn-hud-next-mode').classList.add('hidden');
+            document.getElementById('pause-host-controls').classList.add('hidden');
+            document.getElementById('kill-feed').innerHTML = '';
+
+            document.getElementById('lobby-status').classList.add('hidden');
+            document.getElementById('lobby-modal').classList.remove('hidden');
+
+            showToast('Returned to Lobby');
+        }
+
+        function togglePauseMenu(forceState = null) {
+            if (!state.inGame || state.isMatchOver) return;
+            state.isPaused = forceState !== null ? forceState : !state.isPaused;
+            const pauseModal = document.getElementById('pause-modal');
+
+            if (state.isPaused) {
+                state.mouseDown = false;
+                if (document.pointerLockElement) {
+                    try { document.exitPointerLock(); } catch (e) {}
+                }
+                document.getElementById('pause-room-id').textContent = state.roomId;
+                document.getElementById('pause-round-info').textContent = `${state.currentRound}/${state.totalRounds}`;
+                pauseModal.classList.remove('hidden');
+                document.getElementById('lock-banner').classList.add('hidden');
+            } else {
+                pauseModal.classList.add('hidden');
+                const canvas = document.getElementById('game-canvas');
+                if (canvas.requestPointerLock && !('ontouchstart' in window)) {
+                    try {
+                        const promise = canvas.requestPointerLock();
+                        if (promise && promise.catch) promise.catch(() => {});
+                    } catch (e) {}
+                }
+            }
+        }
+
+        function spawnAiBot() {
+            const botNames = ['CIPHER-X', 'VORTEX-9', 'KRAKEN-AI', 'SPECTRE', 'VALKYRIE', 'NEXUS-01'];
+            const botId = 'bot-' + Math.random().toString(36).substring(2, 7);
+            const name = botNames[Math.floor(Math.random() * botNames.length)];
+            const color = NEON_COLORS[Math.floor(Math.random() * NEON_COLORS.length)].hex;
+            const spawn = getSafeSpawnPoint();
+
+            const botData = {
+                id: botId,
+                name,
+                color,
+                isBot: true,
+                x: spawn.x,
+                z: spawn.z,
+                hp: MAX_HP,
+                score: 0,
+                kills: 0,
+                deaths: 0
+            };
+            addOrUpdatePlayer(botData);
+            if (state.isHost && !state.isSolo) {
+                broadcastToClients({ type: 'player_joined', player: botData });
+            }
+        }
+
+        function broadcastToClients(payload, excludePeerId = null) {
+            if (!state.isHost || state.isSolo) return;
+            for (const peerId in clientConns) {
+                if (peerId !== excludePeerId && clientConns[peerId].open) {
+                    clientConns[peerId].send(payload);
+                }
+            }
+        }
+
+        function handleNetworkMessage(senderId, msg) {
+            if (!msg || !msg.type) return;
+
+            if (state.isHost) {
+                switch (msg.type) {
+                    case 'join': {
+                        const newPlayer = addOrUpdatePlayer({
+                            id: msg.id,
+                            name: msg.name,
+                            color: msg.color,
+                            x: msg.x,
+                            z: msg.z,
+                            hp: MAX_HP,
+                            score: 0,
+                            kills: 0,
+                            deaths: 0
+                        });
+                        showToast(`${newPlayer.name} joined the arena!`);
+
+                        const roster = {};
+                        for (const id in state.players) {
+                            const p = state.players[id];
+                            roster[id] = {
+                                id: p.id, name: p.name, color: p.color, isBot: p.isBot,
+                                x: p.x, y: p.y, z: p.z, hp: p.hp, score: p.score, kills: p.kills, deaths: p.deaths
+                            };
+                        }
+                        if (clientConns[senderId] && clientConns[senderId].open) {
+                            clientConns[senderId].send({
+                                type: 'welcome_roster',
+                                roster,
+                                currentRound: state.currentRound,
+                                totalRounds: state.totalRounds,
+                                modeIndex: state.modeIndex,
+                                roundTimeLeft: state.roundTimeLeft,
+                                kothLocIndex: state.kothLocIndex
+                            });
+                        }
+
+                        broadcastToClients({
+                            type: 'player_joined',
+                            player: roster[msg.id]
+                        }, senderId);
+                        break;
+                    }
+                    case 'state': {
+                        const p = state.players[msg.id];
+                        if (p && p.hp > 0) {
+                            p.targetX = msg.x;
+                            p.targetY = msg.y || 0;
+                            p.targetZ = msg.z;
+                            p.x = msg.x;
+                            p.y = msg.y || 0;
+                            p.z = msg.z;
+                            p.hullYaw = msg.hullYaw;
+                            p.turretYaw = msg.turretYaw;
+                            p.targetTurretYaw = msg.turretYaw;
+                        }
+                        break;
+                    }
+                    case 'fire': {
+                        if (msg.isRail) {
+                            fireAuthoritativeRailgun(msg.ownerId, msg.x, msg.y, msg.z, msg.yaw, msg.pitch || 0, msg.color);
+                        } else {
+                            spawnProjectile(msg.ownerId, msg.x, msg.y || 1.45, msg.z, msg.yaw, msg.color, false);
+                        }
+                        const shooter = state.players[msg.ownerId];
+                        if (shooter) shooter.recoilOffset = 0.45;
+                        broadcastToClients(msg, senderId);
+                        break;
+                    }
+                }
+            } else {
+                switch (msg.type) {
+                    case 'welcome_roster': {
+                        state.totalRounds = msg.totalRounds || 4;
+                        state.kothLocIndex = msg.kothLocIndex || 0;
+                        applyRoundAndMode(msg.currentRound || 1, msg.modeIndex || 0, false);
+                        state.roundTimeLeft = msg.roundTimeLeft || ROUND_DURATION;
+                        for (const id in msg.roster) {
+                            addOrUpdatePlayer(msg.roster[id]);
+                        }
+                        break;
+                    }
+                    case 'round_advance': {
+                        state.totalRounds = msg.totalRounds || state.totalRounds;
+                        state.kothLocIndex = msg.kothLocIndex || 0;
+                        applyRoundAndMode(msg.currentRound, msg.modeIndex, true);
+                        break;
+                    }
+                    case 'match_victory': {
+                        triggerMatchVictory();
+                        break;
+                    }
+                    case 'rematch_start': {
+                        state.totalRounds = msg.totalRounds || state.totalRounds;
+                        resetMatchForRematch();
+                        break;
+                    }
+                    case 'player_joined': {
+                        addOrUpdatePlayer(msg.player);
+                        showToast(`${msg.player.name} joined!`);
+                        break;
+                    }
+                    case 'player_left': {
+                        removePlayer(msg.id);
+                        break;
+                    }
+                    case 'world_snapshot': {
+                        state.roundTimeLeft = msg.roundTimeLeft;
+                        state.currentRound = msg.currentRound || state.currentRound;
+                        document.getElementById('hud-round-counter').textContent = `${state.currentRound} / ${state.totalRounds}`;
+                        updateKothOwnerHUD(msg.kothOwnerId);
+
+                        for (const id in msg.players) {
+                            const snap = msg.players[id];
+                            let p = state.players[id];
+                            if (!p) p = addOrUpdatePlayer(snap);
+
+                            if (id !== state.myId) {
+                                p.targetX = snap.x;
+                                p.targetY = snap.y || 0;
+                                p.targetZ = snap.z;
+                                p.hullYaw = snap.hullYaw;
+                                p.targetTurretYaw = snap.turretYaw;
+                            }
+                            if (p.hp !== snap.hp) {
+                                p.hp = snap.hp;
+                                p.visual.updateNameplate(p.hp, p.name);
+                                p.visual.root.visible = p.hp > 0;
+                            }
+                            p.score = snap.score;
+                            p.kills = snap.kills;
+                            p.deaths = snap.deaths;
+                        }
+                        updateScoreboardUI();
+                        break;
+                    }
+                    case 'fire': {
+                        if (msg.ownerId !== state.myId) {
+                            if (msg.isRail) {
+                                spawnRailBeamVisual(msg.x, msg.y, msg.z, msg.endX, msg.endY, msg.endZ, msg.color);
+                            } else {
+                                spawnProjectile(msg.ownerId, msg.x, msg.y || 1.45, msg.z, msg.yaw, msg.color, false);
+                            }
+                            const shooter = state.players[msg.ownerId];
+                            if (shooter) shooter.recoilOffset = 0.45;
+                        }
+                        break;
+                    }
+                    case 'spawn_orb': {
+                        createOrbMesh(msg.orb);
+                        break;
+                    }
+                    case 'collect_orb': {
+                        removeEnergyOrb(msg.orbId);
+                        if (msg.playerId === state.myId) playSound('orb');
+                        break;
+                    }
+                    case 'hit_event': {
+                        spawnExplosionParticles(msg.x, 1.3, msg.z, msg.color, 16);
+                        spawnShockwave(msg.x, 1.2, msg.z, msg.color);
+                        playSound('hit');
+                        const victim = state.players[msg.victimId];
+                        if (victim) {
+                            victim.hp = msg.newHp;
+                            victim.visual.updateNameplate(victim.hp, victim.name);
+                            if (msg.victimId === state.myId) updateMyVitalsHUD();
+                        }
+                        break;
+                    }
+                    case 'kill_event': {
+                        spawnExplosionParticles(msg.x, 1.5, msg.z, msg.color, 42);
+                        spawnShockwave(msg.x, 1.2, msg.z, msg.color, 6.5);
+                        playSound('explosion');
+                        addKillFeed(msg.killerName, msg.victimName, msg.killerColor);
+
+                        const victim = state.players[msg.victimId];
+                        if (victim) {
+                            victim.hp = 0;
+                            victim.visual.root.visible = false;
+                            if (msg.victimId === state.myId) {
+                                if (cockpitGroup) cockpitGroup.visible = false;
+                                triggerLocalDeathScreen(msg.killerName);
+                            }
+                        }
+                        break;
+                    }
+                    case 'respawn_event': {
+                        const p = state.players[msg.id];
+                        if (p) {
+                            p.hp = MAX_HP;
+                            p.x = msg.x;
+                            p.y = 0;
+                            p.z = msg.z;
+                            p.targetX = msg.x;
+                            p.targetY = 0;
+                            p.targetZ = msg.z;
+                            p.visual.root.position.set(msg.x, 0, msg.z);
+                            p.visual.root.visible = true;
+                            p.visual.updateNameplate(MAX_HP, p.name);
+                            if (msg.id === state.myId) {
+                                document.getElementById('respawn-overlay').classList.add('hidden');
+                                setCameraPerspective(state.isFirstPerson);
+                                updateMyVitalsHUD();
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        // --- 10. SOLID 3D COLLISION & EXACT RAY-AABB WEAPON PHYSICS ---
+        function resolveSolid3DCollisions(x, y, z, radius, height) {
+            let nx = Math.max(-HALF_ARENA, Math.min(HALF_ARENA, x));
+            let nz = Math.max(-HALF_ARENA, Math.min(HALF_ARENA, z));
+            let supportFloorY = 0;
+
+            for (const obs of ARENA_OBSTACLES) {
+                const halfW = obs.w / 2;
+                const halfD = obs.d / 2;
+                const obsTop = obs.h + 0.15;
+
+                // Check horizontal footprint overlap for landing on top of solid platforms
+                const withinTopX = Math.abs(nx - obs.x) <= halfW + radius * 0.65;
+                const withinTopZ = Math.abs(nz - obs.z) <= halfD + radius * 0.65;
+
+                if (withinTopX && withinTopZ && y >= obsTop - 0.35) {
+                    if (obsTop > supportFloorY) supportFloorY = obsTop;
+                    continue;
+                }
+
+                // Otherwise, tank is alongside obstacle height -> enforce rock-solid horizontal push-out
+                if (y < obsTop - 0.1) {
+                    const closestX = Math.max(obs.x - halfW, Math.min(nx, obs.x + halfW));
+                    const closestZ = Math.max(obs.z - halfD, Math.min(nz, obs.z + halfD));
+
+                    const dx = nx - closestX;
+                    const dz = nz - closestZ;
+                    const distSq = dx * dx + dz * dz;
+
+                    if (distSq < radius * radius) {
+                        const dist = Math.sqrt(distSq);
+                        if (dist > 0.0001) {
+                            const overlap = radius - dist;
+                            nx += (dx / dist) * overlap;
+                            nz += (dz / dist) * overlap;
+                        } else {
+                            // Deep penetration fallback: push out along shortest axis
+                            const penLeft = Math.abs(nx - (obs.x - halfW));
+                            const penRight = Math.abs((obs.x + halfW) - nx);
+                            const penTop = Math.abs(nz - (obs.z - halfD));
+                            const penBottom = Math.abs((obs.z + halfD) - nz);
+                            const minPen = Math.min(penLeft, penRight, penTop, penBottom);
+                            if (minPen === penLeft) nx = obs.x - halfW - radius;
+                            else if (minPen === penRight) nx = obs.x + halfW + radius;
+                            else if (minPen === penTop) nz = obs.z - halfD - radius;
+                            else nz = obs.z + halfD + radius;
+                        }
+                    }
+                }
+            }
+            return { x: nx, z: nz, supportFloorY };
+        }
+
+        function pointHitsObstacle(x, z, y = 1.45) {
+            if (Math.abs(x) >= ARENA_SIZE / 2 || Math.abs(z) >= ARENA_SIZE / 2) return true;
+            for (const obs of ARENA_OBSTACLES) {
+                if (y <= obs.h + 0.18 && Math.abs(x - obs.x) <= obs.w / 2 && Math.abs(z - obs.z) <= obs.d / 2) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Exact 3D Ray-vs-AABB intersection so Railgun beams stop cleanly at solid walls
+        function raycastObstacles(ox, oy, oz, dx, dy, dz, maxDist) {
+            let closestT = maxDist;
+
+            // Arena boundary planes
+            const bound = ARENA_SIZE / 2;
+            if (Math.abs(dx) > 1e-5) {
+                const tx1 = (-bound - ox) / dx;
+                const tx2 = (bound - ox) / dx;
+                if (tx1 > 0 && tx1 < closestT) closestT = tx1;
+                if (tx2 > 0 && tx2 < closestT) closestT = tx2;
+            }
+            if (Math.abs(dz) > 1e-5) {
+                const tz1 = (-bound - oz) / dz;
+                const tz2 = (bound - oz) / dz;
+                if (tz1 > 0 && tz1 < closestT) closestT = tz1;
+                if (tz2 > 0 && tz2 < closestT) closestT = tz2;
+            }
+            if (dy < -1e-5) {
+                const tyFloor = -oy / dy;
+                if (tyFloor > 0 && tyFloor < closestT) closestT = tyFloor;
+            }
+
+            // All solid arena obstacles
+            for (const obs of ARENA_OBSTACLES) {
+                const minX = obs.x - obs.w / 2;
+                const maxX = obs.x + obs.w / 2;
+                const minY = 0;
+                const maxY = obs.h + 0.18;
+                const minZ = obs.z - obs.d / 2;
+                const maxZ = obs.z + obs.d / 2;
+
+                let tmin = 0;
+                let tmax = closestT;
+
+                const axes = [
+                    { o: ox, d: dx, min: minX, max: maxX },
+                    { o: oy, d: dy, min: minY, max: maxY },
+                    { o: oz, d: dz, min: minZ, max: maxZ }
+                ];
+                let hit = true;
+                for (const ax of axes) {
+                    if (Math.abs(ax.d) < 1e-6) {
+                        if (ax.o < ax.min || ax.o > ax.max) { hit = false; break; }
+                    } else {
+                        let t1 = (ax.min - ax.o) / ax.d;
+                        let t2 = (ax.max - ax.o) / ax.d;
+                        if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+                        tmin = Math.max(tmin, t1);
+                        tmax = Math.min(tmax, t2);
+                        if (tmin > tmax) { hit = false; break; }
+                    }
+                }
+                if (hit && tmin >= 0 && tmin < closestT) {
+                    closestT = tmin;
+                }
+            }
+            return closestT;
+        }
+
+        function fireWeapon(player) {
+            if (!player || player.hp <= 0 || state.isMatchOver) return;
+
+            const mode = getCurrentMode();
+            const isRail = mode.id === 'LOW_GRAV_RAIL';
+            const muzzleDist = 2.55;
+            const yaw = player.turretYaw;
+            const pitch = player.id === state.myId && state.isFirstPerson ? -state.cameraPitch * 0.45 : 0;
+
+            const dirX = -Math.sin(yaw);
+            const dirZ = -Math.cos(yaw);
+            const startX = player.x + dirX * muzzleDist;
+            const startY = (player.y || 0) + (state.isFirstPerson && player.id === state.myId ? 1.85 : 1.45);
+            const startZ = player.z + dirZ * muzzleDist;
+
+            player.recoilOffset = 0.45;
+            if (player.id === state.myId) {
+                state.cockpitRecoil = 0.14;
+                state.cockpitFlashTimer = 0.06;
+            }
+            playSound(isRail ? 'rail' : 'laser');
+
+            if (isRail) {
+                const beamResult = fireAuthoritativeRailgun(player.id, startX, startY, startZ, yaw, pitch, player.color);
+                if (player.id === state.myId && !state.isHost && hostConn && hostConn.open) {
+                    hostConn.send({
+                        type: 'fire',
+                        ownerId: player.id,
+                        x: startX, y: startY, z: startZ,
+                        yaw, pitch,
+                        color: player.color,
+                        isRail: true
+                    });
+                } else if (state.isHost) {
+                    broadcastToClients({
+                        type: 'fire',
+                        ownerId: player.id,
+                        x: startX, y: startY, z: startZ,
+                        endX: beamResult.endX, endY: beamResult.endY, endZ: beamResult.endZ,
+                        yaw,
+                        color: player.color,
+                        isRail: true
+                    }, player.id === state.myId ? null : player.id);
+                }
+            } else {
+                spawnProjectile(player.id, startX, startY, startZ, yaw, player.color, false);
+                if (player.id === state.myId) {
+                    const firePacket = {
+                        type: 'fire',
+                        ownerId: player.id,
+                        x: startX, y: startY, z: startZ,
+                        yaw,
+                        color: player.color,
+                        isRail: false
+                    };
+                    if (state.isHost) broadcastToClients(firePacket);
+                    else if (hostConn && hostConn.open) hostConn.send(firePacket);
+                } else if (state.isHost && player.isBot) {
+                    broadcastToClients({
+                        type: 'fire',
+                        ownerId: player.id,
+                        x: startX, y: startY, z: startZ,
+                        yaw,
+                        color: player.color,
+                        isRail: false
+                    });
+                }
+            }
+        }
+
+        function fireAuthoritativeRailgun(ownerId, ox, oy, oz, yaw, pitch, colorHex) {
+            const dx = -Math.sin(yaw) * Math.cos(pitch);
+            const dy = Math.sin(pitch);
+            const dz = -Math.cos(yaw) * Math.cos(pitch);
+
+            const wallDist = raycastObstacles(ox, oy, oz, dx, dy, dz, 140);
+            const endX = ox + dx * wallDist;
+            const endY = oy + dy * wallDist;
+            const endZ = oz + dz * wallDist;
+
+            spawnRailBeamVisual(ox, oy, oz, endX, endY, endZ, colorHex);
+            spawnExplosionParticles(endX, endY, endZ, colorHex, 14);
+
+            if (state.isHost) {
+                for (const id in state.players) {
+                    if (id === ownerId) continue;
+                    const target = state.players[id];
+                    if (target.hp <= 0) continue;
+
+                    // Point-to-segment distance check up to wallDist
+                    const vx = target.x - ox;
+                    const vy = ((target.y || 0) + 1.2) - oy;
+                    const vz = target.z - oz;
+                    const projT = vx * dx + vy * dy + vz * dz;
+                    if (projT > 0 && projT < wallDist) {
+                        const cx = ox + dx * projT;
+                        const cy = oy + dy * projT;
+                        const cz = oz + dz * projT;
+                        const horizDist = Math.hypot(target.x - cx, target.z - cz);
+                        const vertDist = Math.abs(((target.y || 0) + 1.2) - cy);
+                        if (horizDist <= TANK_RADIUS + 0.65 && vertDist <= 2.1) {
+                            applyAuthoritativeDamage(ownerId, target.id, cx, cz);
+                        }
+                    }
+                }
+            }
+
+            return { endX, endY, endZ };
+        }
+
+        function spawnRailBeamVisual(x1, y1, z1, x2, y2, z2, colorHex) {
+            const start = new THREE.Vector3(x1, y1, z1);
+            const end = new THREE.Vector3(x2, y2, z2);
+            const dist = start.distanceTo(end);
+            if (dist < 0.2) return;
+
+            const geo = new THREE.CylinderGeometry(0.16, 0.16, dist, 8);
+            geo.rotateX(Math.PI / 2);
+            const mat = new THREE.MeshBasicMaterial({
+                color: new THREE.Color(colorHex).getHex(),
+                transparent: true,
+                opacity: 0.95
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.copy(start).lerp(end, 0.5);
+            mesh.lookAt(end);
+            scene.add(mesh);
+
+            state.railBeams.push({ mesh, life: 0.28, maxLife: 0.28 });
+        }
+
+        function spawnProjectile(ownerId, x, y, z, yaw, colorHex) {
+            const mode = getCurrentMode();
+            const colorNum = new THREE.Color(colorHex).getHex();
+
+            const boltGeo = new THREE.CylinderGeometry(0.18, 0.18, 2.0, 8);
+            boltGeo.rotateX(Math.PI / 2);
+            const boltMat = new THREE.MeshBasicMaterial({ color: colorNum });
+            const mesh = new THREE.Mesh(boltGeo, boltMat);
+            mesh.position.set(x, y, z);
+            mesh.rotation.y = yaw;
+            scene.add(mesh);
+
+            const speed = BASE_PROJECTILE_SPEED * mode.projSpeedMult;
+            const dirX = -Math.sin(yaw);
+            const dirZ = -Math.cos(yaw);
+
+            state.projectiles.push({
+                ownerId,
+                x, y, z,
+                vx: dirX * speed,
+                vz: dirZ * speed,
+                color: colorHex,
+                ttl: PROJECTILE_TTL,
+                mesh
+            });
+        }
+
+        function spawnShockwave(x, y, z, colorHex, maxScale = 4.0) {
+            const colorNum = new THREE.Color(colorHex).getHex();
+            const geo = new THREE.RingGeometry(0.4, 0.75, 24);
+            geo.rotateX(-Math.PI / 2);
+            const mat = new THREE.MeshBasicMaterial({
+                color: colorNum,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.9
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, y, z);
+            scene.add(mesh);
+            state.shockwaves.push({ mesh, life: 0.32, maxLife: 0.32, maxScale });
+        }
+
+        function spawnExplosionParticles(x, y, z, colorHex, count = 18) {
+            const colorNum = new THREE.Color(colorHex).getHex();
+            const geo = new THREE.BoxGeometry(0.32, 0.32, 0.32);
+            const mat = new THREE.MeshBasicMaterial({ color: colorNum });
+
+            for (let i = 0; i < count; i++) {
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, y, z);
+                scene.add(mesh);
+
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 4 + Math.random() * 20;
+                state.particles.push({
+                    mesh,
+                    vx: Math.cos(angle) * speed,
+                    vy: 4 + Math.random() * 13,
+                    vz: Math.sin(angle) * speed,
+                    life: 0.35 + Math.random() * 0.35
+                });
+            }
+        }
+
+        function applyAuthoritativeDamage(shooterId, victimId, hitX, hitZ) {
+            const victim = state.players[victimId];
+            const shooter = state.players[shooterId];
+            if (!victim || victim.hp <= 0 || state.isMatchOver) return;
+
+            const mode = getCurrentMode();
+            victim.hp = Math.max(0, victim.hp - mode.damage);
+            victim.visual.updateNameplate(victim.hp, victim.name);
+
+            const shooterColor = shooter ? shooter.color : '#22d3ee';
+            const shooterName = shooter ? shooter.name : 'Unknown';
+
+            spawnExplosionParticles(hitX, (victim.y || 0) + 1.3, hitZ, shooterColor, 16);
+            spawnShockwave(hitX, (victim.y || 0) + 1.2, hitZ, shooterColor, 3.8);
+            playSound('hit');
+
+            if (victimId === state.myId) updateMyVitalsHUD();
+
+            broadcastToClients({
+                type: 'hit_event',
+                victimId,
+                newHp: victim.hp,
+                x: hitX,
+                z: hitZ,
+                color: shooterColor
+            });
+
+            if (victim.hp <= 0) {
+                victim.deaths += 1;
+                victim.respawnTimer = RESPAWN_TIME;
+                victim.visual.root.visible = false;
+
+                if (shooter && shooter.id !== victim.id) {
+                    shooter.kills += 1;
+                    shooter.score += 100;
+                }
+
+                spawnExplosionParticles(victim.x, (victim.y || 0) + 1.5, victim.z, victim.color, 42);
+                spawnShockwave(victim.x, (victim.y || 0) + 1.2, victim.z, victim.color, 6.5);
+                playSound('explosion');
+                addKillFeed(shooterName, victim.name, shooterColor);
+                updateScoreboardUI();
+
+                if (victimId === state.myId) {
+                    if (cockpitGroup) cockpitGroup.visible = false;
+                    triggerLocalDeathScreen(shooterName);
+                }
+
+                broadcastToClients({
+                    type: 'kill_event',
+                    killerId: shooterId,
+                    killerName: shooterName,
+                    killerColor: shooterColor,
+                    victimId: victim.id,
+                    victimName: victim.name,
+                    x: victim.x,
+                    z: victim.z,
+                    color: victim.color
+                });
+            }
+        }
+
+        function triggerLocalDeathScreen(killerName) {
+            const overlay = document.getElementById('respawn-overlay');
+            document.getElementById('killed-by-text').textContent = `Vaporized by ${killerName}`;
+            overlay.classList.remove('hidden');
+            let remaining = RESPAWN_TIME;
+            const timerEl = document.getElementById('respawn-timer');
+            timerEl.textContent = remaining.toFixed(1);
+
+            const interval = registerManagedInterval(() => {
+                if (!state.inGame || state.isMatchOver) {
+                    clearInterval(interval);
+                    overlay.classList.add('hidden');
+                    return;
+                }
+                remaining -= 0.1;
+                if (remaining <= 0) {
+                    clearInterval(interval);
+                    overlay.classList.add('hidden');
+                } else {
+                    timerEl.textContent = remaining.toFixed(1);
+                }
+            }, 100);
+        }
+
+        // --- 11. MAIN SIMULATION & RENDER LOOP ---
+        function updateSimulation(dt) {
+            const elapsed = clock.getElapsedTime();
+
+            if (centerCrystalMesh) {
+                centerCrystalMesh.rotation.y = elapsed * 1.1;
+                centerCrystalMesh.position.y = 10.5 + Math.sin(elapsed * 2.2) * 0.6;
+            }
+            if (outerHoloRing) {
+                outerHoloRing.rotation.z = elapsed * 0.7;
+                outerHoloRing.position.y = 10.5 + Math.sin(elapsed * 2.2) * 0.6;
+            }
+            for (const jp of jumpPadMeshes) {
+                jp.ring.rotation.z = elapsed * 2.0;
+            }
+            for (const orb of state.energyOrbs) {
+                orb.mesh.rotation.y = elapsed * 2.5;
+                orb.mesh.position.y = 1.45 + Math.sin(elapsed * 4 + orb.x) * 0.35;
+            }
+            if (kothGroup && kothGroup.visible) {
+                kothRingMesh.rotation.z = elapsed * 0.8;
+            }
+
+            if (!state.inGame) {
+                const t = elapsed * 0.22;
+                camera.position.set(Math.sin(t) * 56, 30, Math.cos(t) * 56);
+                camera.lookAt(0, 3, 0);
+                return;
+            }
+
+            const now = performance.now() / 1000;
+            const mode = getCurrentMode();
+            const me = state.players[state.myId];
+
+            // 1. Update Local Player Movement, Solid 3D Platform Support & Controls
+            if (me && me.hp > 0 && !state.isPaused && !state.isMatchOver) {
+                const effectiveDashCooldown = BASE_DASH_COOLDOWN * mode.dashCooldownMult;
+                const effectiveFireCooldown = BASE_FIRE_COOLDOWN / mode.fireRateMult;
+                const effectiveSpeed = BASE_TANK_SPEED * mode.speedMult;
+
+                if (me.dashCooldown > 0) me.dashCooldown = Math.max(0, me.dashCooldown - dt);
+                if (me.dashTimer > 0) me.dashTimer = Math.max(0, me.dashTimer - dt);
+
+                let forward = 0;
+                let right = 0;
+                if (state.keys.w) forward += 1;
+                if (state.keys.s) forward -= 1;
+                if (state.keys.d) right += 1;
+                if (state.keys.a) right -= 1;
+
+                if (Math.abs(state.touchMove.x) > 0.05 || Math.abs(state.touchMove.y) > 0.05) {
+                    right += state.touchMove.x;
+                    forward -= state.touchMove.y;
+                }
+
+                const sinY = Math.sin(state.cameraYaw);
+                const cosY = Math.cos(state.cameraYaw);
+                let moveX = (-sinY * forward) + (cosY * right);
+                let moveZ = (-cosY * forward) + (-sinY * right);
+                const moveLen = Math.hypot(moveX, moveZ);
+                if (moveLen > 0.001) {
+                    moveX /= moveLen;
+                    moveZ /= moveLen;
+                }
+
+                // Trigger Thruster Dash (or Vertical Jump in Low-G Railgun)
+                if (state.keys.space && me.dashCooldown <= 0) {
+                    if (mode.id === 'LOW_GRAV_RAIL' && me.vy <= 0.1) {
+                        me.vy = mode.jumpBoost;
+                        me.dashCooldown = effectiveDashCooldown;
+                        playSound('dash');
+                        spawnShockwave(me.x, me.y + 0.2, me.z, me.color, 4.5);
+                    } else if (moveLen > 0.01) {
+                        me.dashTimer = DASH_DURATION;
+                        me.dashCooldown = effectiveDashCooldown;
+                        me.dashDirX = moveX;
+                        me.dashDirZ = moveZ;
+                        playSound('dash');
+                        spawnExplosionParticles(me.x, me.y + 0.7, me.z, me.color, 12);
+                    }
+                }
+
+                // Energy Jump Pads
+                for (const jp of JUMP_PADS) {
+                    if (me.y <= 0.35 && Math.hypot(me.x - jp.x, me.z - jp.z) < 3.3) {
+                        me.vy = mode.jumpBoost * 1.18;
+                        playSound('dash');
+                        spawnShockwave(jp.x, 0.3, jp.z, '#10b981', 5.0);
+                    }
+                }
+
+                let vx = 0;
+                let vz = 0;
+                if (me.dashTimer > 0) {
+                    vx = me.dashDirX * DASH_SPEED;
+                    vz = me.dashDirZ * DASH_SPEED;
+                } else {
+                    vx = moveX * effectiveSpeed;
+                    vz = moveZ * effectiveSpeed;
+                }
+
+                // Sub-stepped 3D Solid Collision Resolution (prevents tunneling at dash speed)
+                const subSteps = 2;
+                const subDt = dt / subSteps;
+                let floorSupportY = 0;
+                for (let s = 0; s < subSteps; s++) {
+                    const res = resolveSolid3DCollisions(me.x + vx * subDt, me.y, me.z + vz * subDt, TANK_RADIUS, TANK_HEIGHT);
+                    me.x = res.x;
+                    me.z = res.z;
+                    floorSupportY = res.supportFloorY;
+                }
+
+                // Vertical Gravity & Solid Platform Landing
+                if (me.y > floorSupportY || me.vy > 0) {
+                    me.y += me.vy * dt;
+                    me.vy -= mode.gravity * dt;
+                    if (me.y <= floorSupportY) {
+                        me.y = floorSupportY;
+                        me.vy = 0;
+                    }
+                } else {
+                    me.y = floorSupportY;
+                }
+
+                const thrustScale = me.dashTimer > 0 ? 1.85 : (moveLen > 0.05 ? 1.15 : 0.45);
+                me.visual.leftPlume.scale.set(1, 1, thrustScale);
+                me.visual.rightPlume.scale.set(1, 1, thrustScale);
+
+                if (moveLen > 0.05) {
+                    const desiredHullYaw = Math.atan2(-moveX, -moveZ);
+                    me.hullYaw = lerpAngle(me.hullYaw, desiredHullYaw, dt * 10);
+                }
+
+                me.turretYaw = state.cameraYaw;
+
+                if (state.mouseDown && (now - state.lastFireTime) >= effectiveFireCooldown) {
+                    state.lastFireTime = now;
+                    fireWeapon(me);
+                }
+
+                updateMyVitalsHUD();
+            }
+
+            // 2. Host Authoritative Round Timer, KOTH Capture, Overdrive Orbs & AI Bots
+            if (state.isHost && !state.isMatchOver) {
+                state.roundTimeLeft -= dt;
+                if (state.roundTimeLeft <= 0) {
+                    advanceRoundOrFinishMatch();
+                }
+
+                if (mode.id === 'KOTH') {
+                    const loc = KOTH_LOCATIONS[state.kothLocIndex % KOTH_LOCATIONS.length];
+                    const insidePilots = [];
+                    for (const id in state.players) {
+                        const p = state.players[id];
+                        if (p.hp > 0 && Math.hypot(p.x - loc.x, p.z - loc.z) <= 9.2) {
+                            insidePilots.push(p);
+                        }
+                    }
+                    if (insidePilots.length === 1) {
+                        state.kothOwnerId = insidePilots[0].id;
+                        state.kothTickAccum += dt;
+                        if (state.kothTickAccum >= 1.0) {
+                            state.kothTickAccum -= 1.0;
+                            insidePilots[0].score += 25;
+                            updateScoreboardUI();
+                        }
+                    } else {
+                        state.kothOwnerId = null;
+                        state.kothTickAccum = 0;
+                    }
+                    updateKothOwnerHUD(state.kothOwnerId);
+                }
+
+                if (mode.id === 'OVERDRIVE') {
+                    if (Math.random() < dt * 1.4) spawnEnergyOrb();
+                    for (let i = state.energyOrbs.length - 1; i >= 0; i--) {
+                        const orb = state.energyOrbs[i];
+                        for (const id in state.players) {
+                            const p = state.players[id];
+                            if (p.hp > 0 && Math.hypot(p.x - orb.x, p.z - orb.z) < 2.6) {
+                                p.score += 50;
+                                p.hp = Math.min(MAX_HP, p.hp + 20);
+                                p.visual.updateNameplate(p.hp, p.name);
+                                if (p.id === state.myId) {
+                                    playSound('orb');
+                                    updateMyVitalsHUD();
+                                }
+                                removeEnergyOrb(orb.id);
+                                updateScoreboardUI();
+                                broadcastToClients({ type: 'collect_orb', orbId: orb.id, playerId: p.id });
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                for (const id in state.players) {
+                    const p = state.players[id];
+                    if (p.hp <= 0) {
+                        p.respawnTimer -= dt;
+                        if (p.respawnTimer <= 0) {
+                            const spawn = getSafeSpawnPoint();
+                            p.hp = MAX_HP;
+                            p.x = spawn.x;
+                            p.y = 0;
+                            p.z = spawn.z;
+                            p.targetX = spawn.x;
+                            p.targetY = 0;
+                            p.targetZ = spawn.z;
+                            p.visual.root.position.set(spawn.x, 0, spawn.z);
+                            p.visual.root.visible = true;
+                            p.visual.updateNameplate(MAX_HP, p.name);
+
+                            if (p.id === state.myId) setCameraPerspective(state.isFirstPerson);
+
+                            broadcastToClients({
+                                type: 'respawn_event',
+                                id: p.id,
+                                x: spawn.x,
+                                z: spawn.z
+                            });
+                        }
+                        continue;
+                    }
+
+                    if (p.isBot) {
+                        updateAiBot(p, dt);
+                    }
+                }
+            }
+
+            // Update Round Timer HUD
+            const timerEl = document.getElementById('hud-round-timer');
+            timerEl.textContent = formatCountdown(state.roundTimeLeft);
+            if (state.roundTimeLeft <= 10) {
+                timerEl.className = 'font-cyber text-lg sm:text-xl font-black text-rose-400 animate-pulse leading-tight';
+            } else {
+                timerEl.className = 'font-cyber text-lg sm:text-xl font-black text-cyan-300 leading-tight';
+            }
+
+            // 3. Interpolate & Animate All Tank Meshes
+            const hoverBob = Math.sin(elapsed * 5.2) * 0.08;
+            for (const id in state.players) {
+                const p = state.players[id];
+                if (p.hp <= 0) continue;
+
+                if (id !== state.myId && !p.isBot) {
+                    p.x += (p.targetX - p.x) * Math.min(1, dt * 16);
+                    p.y += (p.targetY - p.y) * Math.min(1, dt * 16);
+                    p.z += (p.targetZ - p.z) * Math.min(1, dt * 16);
+                    p.turretYaw = lerpAngle(p.turretYaw, p.targetTurretYaw, Math.min(1, dt * 16));
+                }
+
+                if (p.recoilOffset > 0) p.recoilOffset = Math.max(0, p.recoilOffset - dt * 2.4);
+                p.visual.barrelsGroup.position.z = p.recoilOffset;
+
+                p.visual.root.position.set(p.x, (p.y || 0) + hoverBob, p.z);
+                p.visual.hull.rotation.y = p.hullYaw;
+                p.visual.hoverRing.rotation.z += dt * 2.8;
+                p.visual.turretGroup.rotation.y = p.turretYaw;
+            }
+
+            // 4. Update Projectiles & Solid Obstacle Hit Detection
+            for (let i = state.projectiles.length - 1; i >= 0; i--) {
+                const proj = state.projectiles[i];
+                proj.ttl -= dt;
+                proj.x += proj.vx * dt;
+                proj.z += proj.vz * dt;
+                proj.mesh.position.set(proj.x, proj.y, proj.z);
+
+                let removeProj = proj.ttl <= 0;
+
+                if (!removeProj && pointHitsObstacle(proj.x, proj.z, proj.y)) {
+                    spawnExplosionParticles(proj.x, proj.y, proj.z, proj.color, 10);
+                    removeProj = true;
+                }
+
+                if (!removeProj) {
+                    for (const id in state.players) {
+                        if (id === proj.ownerId) continue;
+                        const target = state.players[id];
+                        if (target.hp <= 0) continue;
+
+                        const distXZ = Math.hypot(proj.x - target.x, proj.z - target.z);
+                        const distY = Math.abs(proj.y - ((target.y || 0) + 1.3));
+                        if (distXZ <= TANK_RADIUS + 0.55 && distY <= 2.2) {
+                            removeProj = true;
+                            if (state.isHost) {
+                                applyAuthoritativeDamage(proj.ownerId, target.id, proj.x, proj.z);
+                            } else {
+                                spawnExplosionParticles(proj.x, proj.y, proj.z, proj.color, 12);
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (removeProj) {
+                    scene.remove(proj.mesh);
+                    state.projectiles.splice(i, 1);
+                }
+            }
+
+            // 5. Update Railgun Beams, Explosion Particles & Shockwaves
+            for (let i = state.railBeams.length - 1; i >= 0; i--) {
+                const rb = state.railBeams[i];
+                rb.life -= dt;
+                rb.mesh.material.opacity = Math.max(0, rb.life / rb.maxLife);
+                if (rb.life <= 0) {
+                    scene.remove(rb.mesh);
+                    state.railBeams.splice(i, 1);
+                }
+            }
+
+            for (let i = state.particles.length - 1; i >= 0; i--) {
+                const pt = state.particles[i];
+                pt.life -= dt;
+                pt.vy -= 28 * dt;
+                pt.mesh.position.x += pt.vx * dt;
+                pt.mesh.position.y += pt.vy * dt;
+                pt.mesh.position.z += pt.vz * dt;
+                pt.mesh.scale.setScalar(Math.max(0.01, pt.life * 2));
+
+                if (pt.life <= 0 || pt.mesh.position.y < 0) {
+                    scene.remove(pt.mesh);
+                    state.particles.splice(i, 1);
+                }
+            }
+
+            for (let i = state.shockwaves.length - 1; i >= 0; i--) {
+                const sw = state.shockwaves[i];
+                sw.life -= dt;
+                const progress = 1 - Math.max(0, sw.life / sw.maxLife);
+                const scale = 0.5 + progress * sw.maxScale;
+                sw.mesh.scale.set(scale, scale, 1);
+                sw.mesh.material.opacity = 1 - progress;
+                if (sw.life <= 0) {
+                    scene.remove(sw.mesh);
+                    state.shockwaves.splice(i, 1);
+                }
+            }
+
+            // 6. Camera Update: 1st-Person Cockpit OR 3rd-Person Chase
+            if (me) {
+                if (state.isFirstPerson && me.hp > 0) {
+                    const eyeY = (me.y || 0) + 1.95 + hoverBob * 0.5;
+                    camera.position.set(me.x, eyeY, me.z);
+                    camera.rotation.order = 'YXZ';
+                    camera.rotation.y = state.cameraYaw;
+                    camera.rotation.x = -state.cameraPitch * 0.55;
+                    camera.rotation.z = 0;
+
+                    if (cockpitGroup) {
+                        cockpitGroup.visible = true;
+                        if (state.cockpitRecoil > 0) state.cockpitRecoil = Math.max(0, state.cockpitRecoil - dt * 0.9);
+                        cockpitLeftBarrel.position.z = -0.95 + state.cockpitRecoil;
+                        cockpitRightBarrel.position.z = -0.95 + state.cockpitRecoil;
+
+                        if (state.cockpitFlashTimer > 0) {
+                            state.cockpitFlashTimer = Math.max(0, state.cockpitFlashTimer - dt);
+                            cockpitMuzzleFlash.material.opacity = 0.85;
+                        } else {
+                            cockpitMuzzleFlash.material.opacity = 0;
+                        }
+                    }
+                } else {
+                    if (cockpitGroup) cockpitGroup.visible = false;
+                    const camDist = 11.8;
+                    const camHeight = (me.y || 0) + 5.2 + Math.sin(state.cameraPitch) * 5.2;
+                    const targetCamX = me.x + Math.sin(state.cameraYaw) * camDist;
+                    const targetCamZ = me.z + Math.cos(state.cameraYaw) * camDist;
+
+                    camera.position.lerp(new THREE.Vector3(targetCamX, camHeight, targetCamZ), Math.min(1, dt * 16));
+
+                    const lookAheadX = me.x - Math.sin(state.cameraYaw) * 10;
+                    const lookAheadZ = me.z - Math.cos(state.cameraYaw) * 10;
+                    camera.lookAt(lookAheadX, (me.y || 0) + 1.6, lookAheadZ);
+                }
+            }
+
+            // 7. Network Synchronization Tick (25Hz)
+            if (!state.isSolo && (now - state.lastNetSend) >= (1 / NETWORK_TICK_RATE)) {
+                state.lastNetSend = now;
+                if (state.isHost) {
+                    const snapshot = {};
+                    for (const id in state.players) {
+                        const p = state.players[id];
+                        snapshot[id] = {
+                            id: p.id, name: p.name, color: p.color, isBot: p.isBot,
+                            x: Number(p.x.toFixed(2)),
+                            y: Number((p.y || 0).toFixed(2)),
+                            z: Number(p.z.toFixed(2)),
+                            hullYaw: Number(p.hullYaw.toFixed(2)),
+                            turretYaw: Number(p.turretYaw.toFixed(2)),
+                            hp: p.hp,
+                            score: p.score,
+                            kills: p.kills,
+                            deaths: p.deaths
+                        };
+                    }
+                    broadcastToClients({
+                        type: 'world_snapshot',
+                        currentRound: state.currentRound,
+                        roundTimeLeft: Number(state.roundTimeLeft.toFixed(1)),
+                        kothOwnerId: state.kothOwnerId,
+                        players: snapshot
+                    });
+                } else if (hostConn && hostConn.open && me) {
+                    hostConn.send({
+                        type: 'state',
+                        id: me.id,
+                        x: Number(me.x.toFixed(2)),
+                        y: Number((me.y || 0).toFixed(2)),
+                        z: Number(me.z.toFixed(2)),
+                        hullYaw: Number(me.hullYaw.toFixed(2)),
+                        turretYaw: Number(me.turretYaw.toFixed(2))
+                    });
+                }
+            }
+        }
+
+        function updateKothOwnerHUD(ownerId) {
+            const ownerEl = document.getElementById('hud-koth-owner');
+            if (!ownerId || !state.players[ownerId]) {
+                ownerEl.textContent = 'CONTESTED / NEUTRAL';
+                ownerEl.style.color = '#fbbf24';
+                if (kothBeaconMesh) kothBeaconMesh.material.color.setHex(0xf59e0b);
+                if (kothRingMesh) kothRingMesh.material.color.setHex(0xf59e0b);
+            } else {
+                const p = state.players[ownerId];
+                ownerEl.textContent = p.name.toUpperCase();
+                ownerEl.style.color = p.color;
+                const colNum = new THREE.Color(p.color).getHex();
+                if (kothBeaconMesh) kothBeaconMesh.material.color.setHex(colNum);
+                if (kothRingMesh) kothRingMesh.material.color.setHex(colNum);
+            }
+        }
+
+        function updateAiBot(bot, dt) {
+            const mode = getCurrentMode();
+            bot.botAiTimer -= dt;
+            bot.botFireCooldown -= dt;
+
+            let nearest = null;
+            let minDist = 9999;
+            for (const id in state.players) {
+                if (id === bot.id) continue;
+                const other = state.players[id];
+                if (other.hp <= 0) continue;
+                const d = Math.hypot(other.x - bot.x, other.z - bot.z);
+                if (d < minDist) {
+                    minDist = d;
+                    nearest = other;
+                }
+            }
+
+            if (bot.botAiTimer <= 0) {
+                bot.botAiTimer = 0.75 + Math.random() * 1.0;
+                if (mode.id === 'KOTH') {
+                    const loc = KOTH_LOCATIONS[state.kothLocIndex % KOTH_LOCATIONS.length];
+                    const distToHill = Math.hypot(loc.x - bot.x, loc.z - bot.z);
+                    if (distToHill > 6) {
+                        bot.botMoveAngle = Math.atan2(-(loc.x - bot.x), -(loc.z - bot.z));
+                    } else {
+                        bot.botMoveAngle += (Math.random() - 0.5) * 2.2;
+                    }
+                } else if (nearest) {
+                    const toTarget = Math.atan2(-(nearest.x - bot.x), -(nearest.z - bot.z));
+                    const strafeOffset = minDist < 22 ? (Math.random() > 0.5 ? 1.2 : -1.2) : (Math.random() - 0.5) * 0.6;
+                    bot.botMoveAngle = toTarget + strafeOffset;
+                } else {
+                    bot.botMoveAngle = Math.random() * Math.PI * 2;
+                }
+            }
+
+            const moveX = -Math.sin(bot.botMoveAngle);
+            const moveZ = -Math.cos(bot.botMoveAngle);
+            const botSpeed = BASE_TANK_SPEED * 0.78 * mode.speedMult;
+            const resolved = resolveSolid3DCollisions(
+                bot.x + moveX * botSpeed * dt,
+                bot.y || 0,
+                bot.z + moveZ * botSpeed * dt,
+                TANK_RADIUS,
+                TANK_HEIGHT
+            );
+            bot.x = resolved.x;
+            bot.z = resolved.z;
+            bot.hullYaw = lerpAngle(bot.hullYaw, bot.botMoveAngle, dt * 6);
+
+            if (nearest && minDist < 68) {
+                const aimYaw = Math.atan2(-(nearest.x - bot.x), -(nearest.z - bot.z));
+                bot.turretYaw = lerpAngle(bot.turretYaw, aimYaw, dt * 7);
+
+                if (bot.botFireCooldown <= 0) {
+                    bot.botFireCooldown = (0.65 + Math.random() * 0.5) / mode.fireRateMult;
+                    fireWeapon(bot);
+                }
+            }
+        }
+
+        function lerpAngle(a, b, t) {
+            let diff = b - a;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            return a + diff * t;
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.1);
+            updateSimulation(dt);
+            if (bloomEnabled && composer) {
+                composer.render();
+            } else {
+                renderer.render(scene, camera);
+            }
+        }
+
+        // --- 12. HUD & UI UPDATES ---
+        function enterArena() {
+            state.inGame = true;
+            state.isPaused = false;
+            state.isMatchOver = false;
+            document.getElementById('lobby-modal').classList.add('hidden');
+            document.getElementById('pause-modal').classList.add('hidden');
+            document.getElementById('victory-modal').classList.add('hidden');
+            document.getElementById('hud-top-left').classList.remove('hidden');
+            document.getElementById('hud-top-center').classList.remove('hidden');
+            document.getElementById('hud-top-right').classList.remove('hidden');
+            document.getElementById('hud-bottom').classList.remove('hidden');
+            document.getElementById('crosshair').classList.remove('hidden');
+            document.getElementById('lock-banner').classList.remove('hidden');
+
+            document.getElementById('hud-room-id').textContent = state.roomId;
+            document.getElementById('net-role-badge').textContent = state.isSolo ? 'SOLO ARENA' : (state.isHost ? 'HOST SERVER' : 'CLIENT');
+            setCameraPerspective(state.isFirstPerson);
+
+            if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+                document.getElementById('mobile-controls').classList.remove('hidden');
+                document.getElementById('lock-banner').classList.add('hidden');
+            }
+        }
+
+        function setLobbyStatus(text) {
+            const el = document.getElementById('lobby-status');
+            el.textContent = text;
+            el.classList.remove('hidden');
+        }
+
+        function updateMyVitalsHUD() {
+            const me = state.players[state.myId];
+            if (!me) return;
+
+            const mode = getCurrentMode();
+            const effectiveDashCooldown = BASE_DASH_COOLDOWN * mode.dashCooldownMult;
+
+            document.getElementById('hud-hp-text').textContent = Math.ceil(me.hp);
+            const hpPct = Math.max(0, (me.hp / MAX_HP) * 100);
+            const hpBar = document.getElementById('hud-hp-bar');
+            hpBar.style.width = `${hpPct}%`;
+            if (hpPct <= 35) {
+                hpBar.className = 'h-full bg-rose-500 transition-all duration-150';
+            } else {
+                hpBar.className = 'h-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all duration-150';
+            }
+
+            document.getElementById('hud-dash-label').textContent = mode.id === 'LOW_GRAV_RAIL' ? 'Anti-Grav Jump [SPACE]' : 'Thruster Dash [SPACE]';
+
+            const dashPct = me.dashCooldown <= 0 ? 100 : Math.max(0, (1 - me.dashCooldown / effectiveDashCooldown) * 100);
+            document.getElementById('hud-dash-bar').style.width = `${dashPct}%`;
+            const dashStatus = document.getElementById('hud-dash-status');
+            if (dashPct >= 100) {
+                dashStatus.textContent = 'READY';
+                dashStatus.className = 'font-cyber text-xs font-bold text-emerald-400';
+            } else {
+                dashStatus.textContent = 'RECHARGING';
+                dashStatus.className = 'font-cyber text-xs font-bold text-amber-400';
+            }
+        }
+
+        function updateScoreboardUI() {
+            const list = document.getElementById('scoreboard-list');
+            const arr = Object.values(state.players).sort((a, b) => b.score - a.score || b.kills - a.kills);
+            document.getElementById('hud-peer-count').textContent = `Pilots: ${arr.length}`;
+
+            list.innerHTML = arr.map((p, idx) => `
+                <div class="flex items-center justify-between px-2 py-1 rounded bg-slate-900/75 ${idx === 0 ? 'border border-amber-400/50' : (p.id === state.myId ? 'border border-cyan-500/40' : '')}">
+                    <div class="flex items-center gap-1.5 truncate">
+                        <span class="font-cyber text-[10px] font-bold ${idx === 0 ? 'text-amber-300' : 'text-slate-500'}">#${idx + 1}</span>
+                        <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${p.color}"></span>
+                        <span class="truncate font-semibold ${p.id === state.myId ? 'text-cyan-300' : 'text-slate-200'}">
+                            ${escapeHtml(p.name)}
+                        </span>
+                    </div>
+                    <span class="font-cyber text-xs text-slate-300 shrink-0 ml-2">${p.score} <span class="text-[10px] text-slate-400">(${p.kills}/${p.deaths})</span></span>
+                </div>
+            `).join('');
+        }
+
+        // --- 13. INPUT & EVENT BINDINGS ---
+        function setupUIAndInputs() {
+            const picker = document.getElementById('color-picker');
+            NEON_COLORS.forEach((c, i) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `w-6 h-6 rounded-full transition transform hover:scale-110 cursor-pointer ${i === 0 ? 'ring-2 ring-white scale-110' : ''}`;
+                btn.style.backgroundColor = c.hex;
+                btn.title = c.name;
+                btn.addEventListener('click', () => {
+                    state.myColor = c.hex;
+                    Array.from(picker.children).forEach(ch => ch.classList.remove('ring-2', 'ring-white', 'scale-110'));
+                    btn.classList.add('ring-2', 'ring-white', 'scale-110');
+                });
+                picker.appendChild(btn);
+            });
+
+            const nameInput = document.getElementById('input-player-name');
+            nameInput.value = state.myName;
+            nameInput.addEventListener('input', (e) => {
+                state.myName = e.target.value.trim() || 'Pilot';
+            });
+
+            const params = new URLSearchParams(window.location.search);
+            const inviteRoom = params.get('room') || window.location.hash.replace('#', '');
+            if (inviteRoom) {
+                document.getElementById('input-room-id').value = inviteRoom.toUpperCase();
+                showToast(`Invite detected for Room ${inviteRoom.toUpperCase()}!`);
+            }
+
+            // Lobby Buttons
+            document.getElementById('btn-host-game').addEventListener('click', () => {
+                state.myName = nameInput.value.trim() || state.myName;
+                startHostMode();
+            });
+
+            document.getElementById('btn-join-game').addEventListener('click', () => {
+                state.myName = nameInput.value.trim() || state.myName;
+                const roomVal = document.getElementById('input-room-id').value;
+                startClientMode(roomVal);
+            });
+
+            document.getElementById('btn-solo-mode').addEventListener('click', () => {
+                state.myName = nameInput.value.trim() || state.myName;
+                startSoloPracticeMode();
+            });
+
+            // Camera Perspective Toggle Buttons
+            const toggleViewHandler = () => {
+                setCameraPerspective(!state.isFirstPerson);
+                showToast(state.isFirstPerson ? 'First-Person Cockpit View' : 'Third-Person Tactical View');
+            };
+            document.getElementById('btn-hud-cam').addEventListener('click', toggleViewHandler);
+            document.getElementById('btn-pause-cam').addEventListener('click', toggleViewHandler);
+
+            // HUD, Pause & Victory Modal Buttons
+            document.getElementById('btn-open-pause').addEventListener('click', () => togglePauseMenu(true));
+            document.getElementById('btn-pause-resume').addEventListener('click', () => togglePauseMenu(false));
+            document.getElementById('btn-hud-exit').addEventListener('click', exitToLobby);
+            document.getElementById('btn-pause-exit').addEventListener('click', exitToLobby);
+            document.getElementById('btn-victory-exit').addEventListener('click', exitToLobby);
+            document.getElementById('btn-victory-rematch').addEventListener('click', () => {
+                if (state.isHost) resetMatchForRematch();
+            });
+
+            document.getElementById('btn-copy-room').addEventListener('click', () => {
+                copyTextFallback(state.roomId, `Copied Room ID: ${state.roomId}`);
+            });
+
+            const copyInviteHandler = () => {
+                const baseUrl = window.location.origin + window.location.pathname;
+                const inviteUrl = `${baseUrl}?room=${encodeURIComponent(state.roomId)}`;
+                copyTextFallback(inviteUrl, 'Invite Link copied! Send it to your friends.');
+            };
+            document.getElementById('btn-copy-link').addEventListener('click', copyInviteHandler);
+            document.getElementById('btn-pause-invite').addEventListener('click', copyInviteHandler);
+
+            document.getElementById('btn-toggle-bot').addEventListener('click', () => {
+                if (state.isHost) {
+                    spawnAiBot();
+                    showToast('AI Combat Bot deployed into arena!');
+                }
+            });
+            document.getElementById('btn-pause-spawn-bot').addEventListener('click', () => {
+                if (state.isHost) {
+                    spawnAiBot();
+                    showToast('AI Combat Bot deployed into arena!');
+                }
+            });
+
+            document.getElementById('btn-hud-next-mode').addEventListener('click', advanceRoundOrFinishMatch);
+            document.getElementById('btn-pause-next-mode').addEventListener('click', () => {
+                advanceRoundOrFinishMatch();
+                togglePauseMenu(false);
+            });
+
+            document.getElementById('btn-pause-sfx').addEventListener('click', (e) => {
+                initAudio();
+                soundEnabled = !soundEnabled;
+                e.target.textContent = soundEnabled ? 'SFX: ON' : 'SFX: OFF';
+            });
+
+            document.getElementById('btn-pause-gfx').addEventListener('click', (e) => {
+                bloomEnabled = !bloomEnabled;
+                e.target.textContent = bloomEnabled ? 'BLOOM: ON' : 'BLOOM: OFF';
+                e.target.className = bloomEnabled
+                    ? 'py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-600/60 text-emerald-300 font-cyber font-bold text-[11px] tracking-wider transition cursor-pointer'
+                    : 'py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 border border-slate-600/60 text-slate-400 font-cyber font-bold text-[11px] tracking-wider transition cursor-pointer';
+            });
+
+            // Safe Pointer Lock & Mouse Camera Aiming
+            const canvas = document.getElementById('game-canvas');
+            const lockBanner = document.getElementById('lock-banner');
+
+            function safeRequestPointerLock() {
+                if (!state.inGame || state.isPaused || state.isMatchOver) return;
+                initAudio();
+                if (canvas.requestPointerLock) {
+                    try {
+                        const promise = canvas.requestPointerLock();
+                        if (promise && promise.catch) promise.catch(() => {});
+                    } catch (e) {}
+                }
+            }
+
+            lockBanner.addEventListener('click', safeRequestPointerLock);
+            canvas.addEventListener('mousedown', (e) => {
+                if (!state.inGame || state.isPaused || state.isMatchOver) return;
+                initAudio();
+                if (e.button === 0) {
+                    state.mouseDown = true;
+                    if (!state.isPointerLocked) safeRequestPointerLock();
+                }
+            });
+
+            window.addEventListener('mouseup', (e) => {
+                if (e.button === 0) state.mouseDown = false;
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                state.isPointerLocked = document.pointerLockElement === canvas;
+                if (state.isPointerLocked) {
+                    lockBanner.classList.add('hidden');
+                } else if (state.inGame && !state.isPaused && !state.isMatchOver) {
+                    lockBanner.classList.remove('hidden');
+                    state.mouseDown = false;
+                }
+            });
+
+            let isDraggingFallback = false;
+            let prevMouseX = 0;
+            let prevMouseY = 0;
+
+            window.addEventListener('mousemove', (e) => {
+                if (!state.inGame || state.isPaused || state.isMatchOver) return;
+                if (state.isPointerLocked) {
+                    state.cameraYaw -= e.movementX * 0.0028;
+                    state.cameraPitch = Math.max(-0.35, Math.min(0.85, state.cameraPitch + e.movementY * 0.0022));
+                } else if (state.mouseDown) {
+                    if (!isDraggingFallback) {
+                        isDraggingFallback = true;
+                        prevMouseX = e.clientX;
+                        prevMouseY = e.clientY;
+                    }
+                    const dx = e.clientX - prevMouseX;
+                    const dy = e.clientY - prevMouseY;
+                    prevMouseX = e.clientX;
+                    prevMouseY = e.clientY;
+                    state.cameraYaw -= dx * 0.005;
+                    state.cameraPitch = Math.max(-0.35, Math.min(0.85, state.cameraPitch + dy * 0.004));
+                } else {
+                    isDraggingFallback = false;
+                }
+            });
+
+            // Keyboard Controls + Camera Toggle (V) + Pause Menu (P / Escape)
+            window.addEventListener('keydown', (e) => {
+                const code = e.code;
+                if (state.inGame && !state.isMatchOver && (code === 'KeyP' || code === 'Escape')) {
+                    togglePauseMenu();
+                    return;
+                }
+                if (state.inGame && !state.isPaused && !state.isMatchOver && code === 'KeyV') {
+                    toggleViewHandler();
+                    return;
+                }
+                if (state.isPaused || state.isMatchOver) return;
+
+                if (code === 'KeyW' || code === 'ArrowUp') state.keys.w = true;
+                if (code === 'KeyS' || code === 'ArrowDown') state.keys.s = true;
+                if (code === 'KeyA' || code === 'ArrowLeft') state.keys.a = true;
+                if (code === 'KeyD' || code === 'ArrowRight') state.keys.d = true;
+                if (code === 'Space') state.keys.space = true;
+            });
+
+            window.addEventListener('keyup', (e) => {
+                const code = e.code;
+                if (code === 'KeyW' || code === 'ArrowUp') state.keys.w = false;
+                if (code === 'KeyS' || code === 'ArrowDown') state.keys.s = false;
+                if (code === 'KeyA' || code === 'ArrowLeft') state.keys.a = false;
+                if (code === 'KeyD' || code === 'ArrowRight') state.keys.d = false;
+                if (code === 'Space') state.keys.space = false;
+            });
+
+            setupTouchControls();
+        }
+
+        function setupTouchControls() {
+            const moveZone = document.getElementById('touch-move-zone');
+            const moveKnob = document.getElementById('touch-move-knob');
+            const fireBtn = document.getElementById('touch-fire-btn');
+            const dashBtn = document.getElementById('touch-dash-btn');
+            const camBtn = document.getElementById('touch-cam-btn');
+            const canvas = document.getElementById('game-canvas');
+
+            moveZone.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                updateJoy(e.touches[0]);
+            }, { passive: false });
+
+            moveZone.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                updateJoy(e.touches[0]);
+            }, { passive: false });
+
+            moveZone.addEventListener('touchend', () => {
+                state.touchMove.x = 0;
+                state.touchMove.y = 0;
+                moveKnob.style.transform = 'translate(0px, 0px)';
+            });
+
+            function updateJoy(touch) {
+                const rect = moveZone.getBoundingClientRect();
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top + rect.height / 2;
+                const maxR = rect.width / 2 - 12;
+                let dx = touch.clientX - cx;
+                let dy = touch.clientY - cy;
+                const dist = Math.hypot(dx, dy);
+                if (dist > maxR) {
+                    dx = (dx / dist) * maxR;
+                    dy = (dy / dist) * maxR;
+                }
+                moveKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+                state.touchMove.x = dx / maxR;
+                state.touchMove.y = dy / maxR;
+            }
+
+            camBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                setCameraPerspective(!state.isFirstPerson);
+            }, { passive: false });
+
+            fireBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                initAudio();
+                state.mouseDown = true;
+            }, { passive: false });
+            fireBtn.addEventListener('touchend', () => { state.mouseDown = false; });
+
+            dashBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                state.keys.space = true;
+                setTimeout(() => { state.keys.space = false; }, 100);
+            }, { passive: false });
+
+            let lastTouchX = null;
+            canvas.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) lastTouchX = e.touches[0].clientX;
+            });
+            canvas.addEventListener('touchmove', (e) => {
+                if (lastTouchX !== null && e.touches.length === 1) {
+                    const dx = e.touches[0].clientX - lastTouchX;
+                    lastTouchX = e.touches[0].clientX;
+                    state.cameraYaw -= dx * 0.007;
+                }
+            });
+            canvas.addEventListener('touchend', () => { lastTouchX = null; });
+        }
+
+        // --- 14. BOOTSTRAP ON WINDOW LOAD ---
+        window.onload = function () {
+            initThreeJS();
+            setupUIAndInputs();
+            animate();
+        };
+    </script>
+</body>
+</html>
